@@ -1,4 +1,4 @@
-name: CodeProject AI.Server (CPU)
+name: CodeProject AI.Server (CUDA 12)
 version: 2.5.1
 url: https://hub.docker.com/r/codeproject/ai-server
 image: ghcr.io/skrashevich/hassio-addon-ai.server-{arch}
