@@ -67,7 +67,7 @@ zurückgesetzt. Drei Schichten Absicherung:
 1. **Ankunft bei der Arbeit** (~21:45) setzt `nacht`.
 2. **Anwesenheitsprüfung** alle 30 Min. zwischen 23:00 und 05:00 — fängt es auf,
    wenn das Ankunfts-Ereignis verlorenging.
-3. **Letztes Netz: Heimkehr zwischen 04:00 und 08:00** schließt den Rolladen
+3. **Letztes Netz: Heimkehr zwischen 04:00 und 09:00** schließt den Rolladen
    auch dann, wenn beide vorherigen Wege versagt haben, und setzt `nacht` nach
    (entspricht der alten Homee-Logik). Damit greifen auch Aufwach-Erkennung und
    das 16:00-Netz. Fenster über `heimkehr_nacht_von` / `heimkehr_nacht_bis`.
@@ -111,6 +111,35 @@ verschiebt sich der Bezugspunkt nach hinten, also in die sichere Richtung.
 > aber auch bedeuten, dass ein hängender Melder den Rolladen öffnet. Nach der
 > Priorisierung (zu früh öffnen ist fatal, zu spät nicht) bleibt es beim
 > Trigger.
+
+### Mehrere Tracker (iPhone + Tesla)
+
+`person.nancy_hiller` wird aus mehreren Trackern gebildet. Home Assistant setzt
+den Person-State auf den **zuletzt aktualisierten** GPS-Tracker. Bei dieser
+Konstellation heißt das:
+
+- das iPhone hat im Gebäude kein Signal — seine letzte Meldung wird alt oder
+  springt beim Wiederverbinden;
+- das Auto steht nicht immer dabei.
+
+Zwei Konsequenzen sind eingebaut:
+
+1. **Anwesenheitsprüfung schaut auf alle Tracker**, nicht auf den Person-State.
+   Meldet *irgendein* Tracker die Arbeitszone, gilt sie als anwesend — der
+   Person-State kann auf `not_home` stehen, während der Tesla noch korrekt
+   `Arbeit` meldet. Ausgelesen über das Attribut `device_trackers` der Person,
+   funktioniert also ohne fest verdrahtete Entity-IDs.
+2. **Während des Nachtmodus wird eine gemeldete Ankunft bei der Arbeit
+   ignoriert.** Sonst der fatale Fall: sie verlässt um 06:15 das Gebäude, das
+   iPhone bekommt wieder Signal und meldet die Arbeitszone nach — das wäre eine
+   „Ankunft" um 06:15 und würde den Modus von `nacht` auf `frueh` setzen. Der
+   Rolladen wäre um 07:00 hochgefahren. Echte Schichtwechsel verlieren dadurch
+   nichts, weil `nacht` spätestens um 16:00 zurückgesetzt wird — lange vor der
+   nächsten Anfahrt.
+
+Springt der Tracker trotzdem so ungünstig, dass gar keine Schicht erkannt wird,
+greift das Heimkehr-Netz: Ankunft zuhause zwischen 04:00 und 09:00 schließt den
+Rolladen in jedem Fall.
 
 ### Zweiter Erkennungsweg: Anwesenheitsprüfung
 

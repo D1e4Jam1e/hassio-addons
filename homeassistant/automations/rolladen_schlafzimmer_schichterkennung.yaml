@@ -31,6 +31,16 @@ description: >
     Diese Prüfung greift nur, wenn der Modus noch "keine" ist - eine
     bereits erkannte Schicht wird nie überschrieben. Damit setzt z.B.
     eine Überstunde nach der Frühschicht nicht versehentlich "spaet".
+    Geprüft werden dabei ALLE Tracker der Person (iPhone, Tesla), nicht
+    nur der zusammengefasste Person-State: meldet einer davon die
+    Arbeitszone, zählt das als anwesend. Der Person-State schaltet auf
+    den zuletzt aktualisierten Tracker um und kann deshalb auf not_home
+    springen, obwohl ein anderer Tracker noch korrekt "Arbeit" meldet.
+
+    Umgekehrt gilt: solange der Nachtmodus läuft (Tagschlaf), wird eine
+    gemeldete "Ankunft bei der Arbeit" ignoriert. Sie ist dann fast
+    sicher ein GPS-Sprung - z.B. wenn das iPhone beim Verlassen des
+    Gebäudes wieder Signal bekommt und die Arbeitszone nachmeldet.
 
   WICHTIG zur Erkennung: der State von person.nancy_hiller ist beim Betreten
   einer Zone NICHT die Entity-ID der Zone ("arbeit"), sondern der ANZEIGENAME
@@ -194,8 +204,10 @@ actions:
       # Kommt sie in diesem Fenster nach Hause, wird Tagschlaf angenommen,
       # auch wenn die Schichterkennung vorher versagt hat (entspricht der
       # alten Homee-Logik). Fenster = Nachtschicht-Ende +/- 2 h.
+      # Bis 09:00 statt 08:00: deckt auch Überstunden und eine verzögert
+      # gemeldete Heimkehr ab (Tracker springt erst spät auf "home").
       heimkehr_nacht_von: "04:00"
-      heimkehr_nacht_bis: "08:00"
+      heimkehr_nacht_bis: "09:00"
       # Bewegung zählt erst als Aufwachen, wenn BEIDE Sperren erfüllt sind.
       # Der WiFa-Flur liegt unten - ein Toilettengang kommt da nicht vorbei,
       # deshalb ist der Melder als Aufwach-Signal gut gewählt. Das Problem
@@ -243,8 +255,19 @@ actions:
         {% endfor %}
         {{ ns.name if ns.dist <= schicht_toleranz else 'keine' }}
       # Ist sie JETZT bei der Arbeit? (Momentaufnahme, unabhängig vom Trigger)
+      # Bewusst NICHT nur der Person-State: die Person wird aus mehreren
+      # Trackern gebildet (iPhone, Tesla) und schaltet auf den zuletzt
+      # aktualisierten um. Das iPhone hat im Gebäude kein Signal, das Auto
+      # ist nicht immer dabei - der Person-State kann dadurch auf not_home
+      # springen, obwohl ein Tracker noch korrekt "Arbeit" meldet. Deshalb
+      # zählt hier: meldet IRGENDEIN Tracker der Person die Arbeitszone?
       aktuell_bei_arbeit: >
-        {{ states('person.nancy_hiller') | lower in arbeit_namen }}
+        {% set tracker = state_attr('person.nancy_hiller', 'device_trackers')
+                         or [] %}
+        {% set zustaende = (expand(tracker) | map(attribute='state') | list)
+                           + [ states('person.nancy_hiller') ] %}
+        {{ zustaende | map('lower') | select('in', arbeit_namen)
+           | list | count > 0 }}
       # In wessen Kernzeit fällt der aktuelle Zeitpunkt? "keine", wenn wir
       # gerade im Übergang zwischen zwei Schichten sind.
       kern_schicht: >
@@ -264,6 +287,27 @@ actions:
             value_template: "{{ arbeit_betreten }}"
         sequence:
           - choose:
+              # Läuft gerade der Tagschlaf, wird der Modus NIE überschrieben.
+              # Eine "Ankunft bei der Arbeit" ist dann fast sicher ein
+              # GPS-Sprung (iPhone bekommt beim Verlassen des Gebäudes wieder
+              # Signal und meldet die Arbeitszone nach). Ohne diese Sperre
+              # würde z.B. eine Meldung um 07:00 den Modus auf "frueh" setzen
+              # und der Rolladen mitten im Schlaf hochfahren.
+              # Echte Schichtwechsel sind davon nicht betroffen: "nacht" wird
+              # spätestens um 16:00 zurückgesetzt, lange vor der nächsten
+              # Anfahrt.
+              - conditions:
+                  - condition: state
+                    entity_id: input_select.schichtmodus_schlafzimmer
+                    state: nacht
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Schichterkennung Schlafzimmer
+                      message: >-
+                        Ankunft bei der Arbeit um {{ now().strftime('%H:%M') }}
+                        gemeldet, aber der Nachtmodus läuft noch (Tagschlaf) -
+                        ignoriert, Modus bleibt "nacht".
               - conditions:
                   - condition: template
                     value_template: "{{ erkannte_schicht != 'keine' }}"
