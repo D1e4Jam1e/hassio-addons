@@ -137,9 +137,25 @@ Zwei Konsequenzen sind eingebaut:
    nichts, weil `nacht` spätestens um 16:00 zurückgesetzt wird — lange vor der
    nächsten Anfahrt.
 
+3. **Das Heimkehr-Ereignis kann komplett ausbleiben.** Steht das Auto zuhause,
+   während sie mit dem iPhone bei der Arbeit ist, kann der Person-State schon
+   auf `home` stehen — bei ihrer echten Ankunft wechselt er dann gar nicht mehr,
+   und `arrived_home` feuert nie. Deshalb wird im Heimkehr-Fenster zusätzlich
+   alle 30 Minuten geprüft: Nachtmodus aktiv und Rolladen nicht geschlossen →
+   zufahren. Normalerweise ist der Rolladen dann ohnehin schon zu
+   (Sonnenuntergang) — der Fall greift vor allem, wenn abends die Klimaanlage
+   lief und das Schließen ausgesetzt wurde.
+
 Springt der Tracker trotzdem so ungünstig, dass gar keine Schicht erkannt wird,
 greift das Heimkehr-Netz: Ankunft zuhause zwischen 04:00 und 09:00 schließt den
 Rolladen in jedem Fall.
+
+> **Bewusst in Kauf genommen:** springt der Person-State an einem normalen Tag
+> zwischen 04:00 und 09:00 auf `home` (GPS-Zucker), setzt das Heimkehr-Netz
+> `nacht` und schließt den Rolladen — es bleibt dann bis 09:30 bzw. 16:00
+> dunkel. Ärgerlich, aber nach der Priorisierung der harmlosere Fehler. Fällt
+> das im Betrieb öfter auf, wäre der Ansatzpunkt, zusätzlich zu verlangen, dass
+> vorher überhaupt eine Abwesenheit von mehreren Stunden lag.
 
 ### Zweiter Erkennungsweg: Anwesenheitsprüfung
 

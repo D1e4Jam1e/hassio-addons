@@ -53,7 +53,16 @@ description: >
   ausgelegt):
     Ankunft zuhause (person.nancy_hiller -> home) während Modus "nacht"
       -> Rolladen SOFORT zu (Tagschlaf).
-    LETZTES NETZ: Heimkehr zwischen 04:00 und 08:00 schliesst den
+    NETZ 2: das Heimkehr-Ereignis kann komplett ausbleiben - z.B. wenn
+      das Auto zuhause steht, während sie mit dem iPhone bei der Arbeit
+      ist. Dann steht die Person schon auf "home" und wechselt bei ihrer
+      echten Ankunft gar nicht mehr. Deshalb wird im Heimkehr-Fenster
+      alle 30 Minuten geprüft: Nachtmodus aktiv und Rolladen nicht
+      geschlossen -> zufahren. Normalerweise ist der Rolladen zu diesem
+      Zeitpunkt ohnehin schon zu (Sonnenuntergang); dieser Fall greift
+      vor allem, wenn abends die Klimaanlage lief und das Schließen
+      ausgesetzt wurde.
+    LETZTES NETZ: Heimkehr zwischen 04:00 und 09:00 schliesst den
       Rolladen auch dann, wenn die Schichterkennung komplett versagt hat,
       und setzt den Modus auf "nacht" nach (entspricht der alten
       Homee-Logik). Damit greifen auch Aufwach-Erkennung und das
@@ -327,6 +336,36 @@ actions:
                     zuzuordnen. Modus bleibt auf
                     "{{ states('input_select.schichtmodus_schlafzimmer') }}".
       - alias: >-
+          Nachtschicht - Rolladen im Heimkehr-Fenster zwangsweise zu (falls
+          das Heimkehr-Ereignis nie kam)
+        conditions:
+          - condition: trigger
+            id: anwesenheit_check
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+          - condition: template
+            value_template: >-
+              {{ heimkehr_nacht_von <= now().strftime('%H:%M')
+                 < heimkehr_nacht_bis }}
+          # "nicht geschlossen" statt "offen": bei unknown/unavailable wird
+          # ebenfalls geschlossen - die sichere Richtung.
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.schlafzimmer
+                state: closed
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: logbook.log
+            data:
+              name: Schichterkennung Schlafzimmer
+              message: >-
+                Nachtmodus aktiv und Rolladen um {{ now().strftime('%H:%M') }}
+                noch offen - zwangsweise geschlossen.
+      - alias: >-
           Schichterkennung - Anwesenheit während der Schicht (Absicherung,
           falls die Ankunft nicht erkannt wurde)
         conditions:
@@ -364,7 +403,7 @@ actions:
             target:
               entity_id: cover.schlafzimmer
       - alias: >-
-          Nachtschicht - LETZTES NETZ: Heimkehr 04:00-08:00, auch ohne
+          Nachtschicht - LETZTES NETZ: Heimkehr 04:00-09:00, auch ohne
           erkannte Schicht Rolladen zu
         conditions:
           - condition: trigger
