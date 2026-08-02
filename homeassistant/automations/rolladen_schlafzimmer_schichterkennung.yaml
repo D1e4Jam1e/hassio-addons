@@ -20,6 +20,18 @@ description: >
     Schichtzeiten ändern sich? Nur die Variablen "schicht_starts" und
     "schicht_toleranz" anpassen, alles andere ergibt sich daraus.
 
+  ANWESENHEITSPRÜFUNG (Absicherung, alle 30 Minuten):
+    Das Betreten der Zone ist ein einmaliges Ereignis - geht es verloren
+    (GPS ungenau, Handy offline, HA gerade neu gestartet), wäre der Modus
+    für den ganzen Tag verloren. Deshalb wird zusätzlich alle 30 Minuten
+    geprüft, ob sie sich gerade IM Kern einer Schicht bei der Arbeit
+    befindet:
+      07:00-13:00 -> frueh | 15:00-21:00 -> spaet | 23:00-05:00 -> nacht
+    (jeweils Schichtbeginn + 1 h bis + 7 h, siehe "kern_von"/"kern_bis")
+    Diese Prüfung greift nur, wenn der Modus noch "keine" ist - eine
+    bereits erkannte Schicht wird nie überschrieben. Damit setzt z.B.
+    eine Überstunde nach der Frühschicht nicht versehentlich "spaet".
+
   WICHTIG zur Erkennung: der State von person.nancy_hiller ist beim Betreten
   einer Zone NICHT die Entity-ID der Zone ("arbeit"), sondern der ANZEIGENAME
   der Zone (z.B. "Arbeit"). Deshalb wird hier auf den Zone-Trigger plus einen
@@ -51,8 +63,10 @@ description: >
   FRÜHSCHICHT:
     Aktuell nur zur Erkennung/für spätere Zwecke, keine eigene
     Rolladen-Wirkung - läuft normal nach der oben beschriebenen
-    07:00/09:00-Grenze. Der Modus wird nach dem morgendlichen Öffnen
-    zurückgesetzt, damit er nicht endlos stehen bleibt.
+    07:00/09:00-Grenze. Der Modus wird erst abends um 21:30 zurückgesetzt
+    (nicht schon morgens): so bleibt er während der ganzen Schicht inkl.
+    Überstunden stehen und blockiert die Anwesenheitsprüfung, die sonst
+    bei Überstunden ab 15:00 fälschlich "spaet" setzen würde.
 
   Abends (Sonnenuntergang) schließt der Rolladen normal, unabhängig vom
   Schichtmodus - ABER: läuft die Klimaanlage (switch.153931628878753_power) zu
@@ -90,6 +104,11 @@ triggers:
       - unknown
       - unavailable
     id: person_zonenwechsel
+  # Absicherung: regelmäßig prüfen, ob sie mitten in einer Schicht bei der
+  # Arbeit ist - falls das einmalige Betreten-Ereignis verloren ging.
+  - trigger: time_pattern
+    minutes: "/30"
+    id: anwesenheit_check
   - trigger: state
     entity_id: person.nancy_hiller
     to: home
@@ -115,6 +134,11 @@ triggers:
   - trigger: time
     at: "10:00:00"
     id: floor_up_spaet
+  # Frühschicht-Modus abräumen: nach dem Ende der Spätschicht-Kernzeit (21:00)
+  # und vor der Nachtschicht-Kernzeit (23:00) bzw. der Anfahrt zur Nachtschicht.
+  - trigger: time
+    at: "21:30:00"
+    id: reset_frueh
   - trigger: sun
     event: sunset
     id: sunset
@@ -138,6 +162,12 @@ actions:
       # Wie weit darf die Ankunft vom Schichtbeginn abweichen (in Stunden),
       # damit sie noch dieser Schicht zugeordnet wird.
       schicht_toleranz: 3
+      # Kernzeit für die Anwesenheitsprüfung: ab wie vielen Stunden nach
+      # Schichtbeginn bis wie viele Stunden danach gilt "sie ist mitten in
+      # dieser Schicht". Bei 8-Stunden-Schichten lässt 1..7 vorne und hinten
+      # je eine Stunde Puffer für Anfahrt und Überstunden.
+      kern_von: 1
+      kern_bis: 7
       # ----------------------------------------------------------------------
       # Alle Schreibweisen, unter denen "zone.arbeit" im State der Person
       # auftauchen kann: der Anzeigename der Zone und die Entity-ID.
@@ -169,6 +199,21 @@ actions:
           {% endif %}
         {% endfor %}
         {{ ns.name if ns.dist <= schicht_toleranz else 'keine' }}
+      # Ist sie JETZT bei der Arbeit? (Momentaufnahme, unabhängig vom Trigger)
+      aktuell_bei_arbeit: >
+        {{ states('person.nancy_hiller') | lower in arbeit_namen }}
+      # In wessen Kernzeit fällt der aktuelle Zeitpunkt? "keine", wenn wir
+      # gerade im Übergang zwischen zwei Schichten sind.
+      kern_schicht: >
+        {% set t = now().hour + now().minute / 60 %}
+        {% set ns = namespace(name='keine') %}
+        {% for name, start in schicht_starts.items() %}
+          {% set seit_start = (t - start) % 24 %}
+          {% if kern_von <= seit_start <= kern_bis %}
+            {% set ns.name = name %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.name }}
   - choose:
       - alias: Schichterkennung - Ankunft bei der Arbeit auswerten
         conditions:
@@ -194,6 +239,32 @@ actions:
                     keinem Schichtbeginn innerhalb von {{ schicht_toleranz }} h
                     zuzuordnen. Modus bleibt auf
                     "{{ states('input_select.schichtmodus_schlafzimmer') }}".
+      - alias: >-
+          Schichterkennung - Anwesenheit während der Schicht (Absicherung,
+          falls die Ankunft nicht erkannt wurde)
+        conditions:
+          - condition: trigger
+            id: anwesenheit_check
+          # Eine bereits erkannte Schicht wird nie überschrieben.
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: keine
+          - condition: template
+            value_template: >-
+              {{ aktuell_bei_arbeit and kern_schicht != 'keine' }}
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: "{{ kern_schicht }}"
+          - action: logbook.log
+            data:
+              name: Schichterkennung Schlafzimmer
+              message: >-
+                Anwesenheit bei der Arbeit um {{ now().strftime('%H:%M') }}
+                erkannt - Modus nachträglich auf "{{ kern_schicht }}" gesetzt
+                (Ankunft wurde nicht erkannt).
       - alias: Nachtschicht - Ankunft zuhause, Rolladen sofort zu
         conditions:
           - condition: trigger
@@ -254,13 +325,18 @@ actions:
           - action: cover.open_cover
             target:
               entity_id: cover.schlafzimmer
-          # Kann hier nur "keine", "frueh" oder "spaet" sein - alle drei sind
-          # nach dem morgendlichen Öffnen erledigt.
-          - action: input_select.select_option
-            target:
-              entity_id: input_select.schichtmodus_schlafzimmer
-            data:
-              option: keine
+          # Nur "spaet" zurücksetzen - "frueh" muss über den Tag stehen
+          # bleiben, siehe Trigger "reset_frueh" um 21:30.
+          - if:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: spaet
+            then:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.schichtmodus_schlafzimmer
+                data:
+                  option: keine
       - alias: >-
           Hochfahren - Boden-Zeit 07:00 (Werktag, weder Nacht- noch Spätschicht,
           kein Urlaub)
@@ -285,11 +361,6 @@ actions:
           - action: cover.open_cover
             target:
               entity_id: cover.schlafzimmer
-          - action: input_select.select_option
-            target:
-              entity_id: input_select.schichtmodus_schlafzimmer
-            data:
-              option: keine
       - alias: >-
           Hochfahren - Boden-Zeit 09:00 (Wochenende oder Urlaub, weder Nacht-
           noch Spätschicht)
@@ -314,11 +385,6 @@ actions:
           - action: cover.open_cover
             target:
               entity_id: cover.schlafzimmer
-          - action: input_select.select_option
-            target:
-              entity_id: input_select.schichtmodus_schlafzimmer
-            data:
-              option: keine
       - alias: >-
           Hochfahren - Boden-Zeit 10:00 (Spätschicht, falls Sonnenaufgang früher
           war)
@@ -334,6 +400,19 @@ actions:
           - action: cover.open_cover
             target:
               entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: Frühschicht-Modus abends zurücksetzen (21:30)
+        conditions:
+          - condition: trigger
+            id: reset_frueh
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: frueh
+        sequence:
           - action: input_select.select_option
             target:
               entity_id: input_select.schichtmodus_schlafzimmer

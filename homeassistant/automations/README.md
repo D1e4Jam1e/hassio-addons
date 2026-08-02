@@ -57,10 +57,35 @@ die Schichtzeiten nicht, reicht es, oben in der Automation die Variablen
 Angenommen wurde das klassische 3-Schicht-System 06:00 / 14:00 / 22:00, passend
 zur genannten Nachtschicht 22:00–06:00.
 
+### Zweiter Erkennungsweg: Anwesenheitsprüfung
+
+Das Betreten der Zone ist ein **einmaliges Ereignis**. Geht es verloren (GPS
+ungenau, Handy offline, HA gerade neu gestartet), wäre der Modus für den ganzen
+Tag verloren. Deshalb prüft ein `time_pattern`-Trigger alle 30 Minuten, ob sie
+sich gerade im **Kern** einer Schicht bei der Arbeit aufhält:
+
+| Kernzeit (Schichtbeginn +1 h bis +7 h) | Modus |
+| --- | --- |
+| 07:00–13:00 | `frueh` |
+| 15:00–21:00 | `spaet` |
+| 23:00–05:00 | `nacht` |
+
+Diese Prüfung setzt den Modus **nur, wenn er noch `keine` ist** — eine bereits
+erkannte Schicht wird nie überschrieben. Damit setzt eine Überstunde nach der
+Frühschicht nicht versehentlich `spaet`. Puffer über `kern_von`/`kern_bis`
+einstellbar.
+
+Beide Wege sind idempotent und ergänzen sich: die Ankunft erkennt sofort und
+präzise, die Anwesenheitsprüfung fängt auf, was durchgerutscht ist (und schreibt
+dann einen Logbuch-Eintrag).
+
 5. **`frueh` blieb ewig stehen.** Der Modus `frueh` wurde nirgends
    zurückgesetzt. Er hat zwar keine Rolladen-Wirkung, blieb aber bis zur
-   nächsten erkannten Schicht stehen. Er wird jetzt nach dem morgendlichen
-   Öffnen auf `keine` zurückgesetzt.
+   nächsten erkannten Schicht stehen. Er wird jetzt um **21:30** zurückgesetzt —
+   bewusst nicht schon beim morgendlichen Öffnen, denn dann würde die
+   Anwesenheitsprüfung bei Frühschicht-Überstunden ab 15:00 auf `keine` treffen
+   und fälschlich `spaet` setzen. 21:30 liegt nach dem Ende der
+   Spätschicht-Kernzeit und vor der Anfahrt zur Nachtschicht.
 
 ### Voraussetzungen
 
