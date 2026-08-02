@@ -104,11 +104,23 @@ description: >
     Überstunden stehen und blockiert die Anwesenheitsprüfung, die sonst
     bei Überstunden ab 15:00 fälschlich "spaet" setzen würde.
 
+  KLIMAANLAGE (switch.153931628878753_power):
+    Es ist ein mobiles Gerät, dessen Abluftschlauch im Fenster liegt - der
+    Rolladen kann physisch nicht schließen, solange es läuft. Deshalb
+    setzt JEDER schließende Zweig aus, wenn die Anlage an ist:
+    Sonnenuntergang, Heimkehr aus der Nachtschicht, das letzte Netz und
+    das Zwangs-Schließen im Heimkehr-Fenster. Sobald die Anlage
+    ausgeschaltet wird und es dunkel ist, holt der Klima-Zweig das
+    Schließen nach - auch nach Mitternacht (dafür wird "after: sunset"
+    ODER "before: sunrise" geprüft; "after: sunset" allein ist nach
+    Mitternacht falsch).
+    Der Schichtmodus wird davon nie blockiert: er wird auch dann gesetzt,
+    wenn der Rolladen gerade nicht zufahren kann. Jeder ausgesetzte
+    Schließvorgang landet im Logbuch - läuft die Anlage also durch,
+    während sie schlafen will, steht dort warum es hell bleibt.
+
   Abends (Sonnenuntergang) schließt der Rolladen normal, unabhängig vom
-  Schichtmodus - ABER: läuft die Klimaanlage (switch.153931628878753_power) zu
-  diesem Zeitpunkt, wird das Schließen ausgesetzt. Sobald die Klimaanlage später
-  ausgeschaltet wird und der reguläre Schließzeitpunkt (Sonnenuntergang) schon
-  vorbei ist, schließt der Rolladen dann sofort nach.
+  Schichtmodus - mit der oben beschriebenen Klimaanlagen-Ausnahme.
 
   Voraussetzung:
     - Helfer input_select.schichtmodus_schlafzimmer anlegen, Optionen:
@@ -407,9 +419,28 @@ actions:
             entity_id: input_select.schichtmodus_schlafzimmer
             state: nacht
         sequence:
-          - action: cover.close_cover
-            target:
-              entity_id: cover.schlafzimmer
+          # Läuft die Klimaanlage, liegt ihr Abluftschlauch im Fenster - der
+          # Rolladen kann dann physisch nicht schließen. Statt zuzufahren
+          # wird das protokolliert; der Klima-Zweig holt das Schließen nach,
+          # sobald die Anlage ausgeschaltet wird.
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: switch.153931628878753_power
+                    state: "on"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Schichterkennung Schlafzimmer
+                      message: >-
+                        Heimkehr aus der Nachtschicht, aber die Klimaanlage
+                        läuft (Abluftschlauch im Fenster) - Rolladen bleibt
+                        offen. Er schließt automatisch, sobald die Anlage
+                        ausgeschaltet wird.
+            default:
+              - action: cover.close_cover
+                target:
+                  entity_id: cover.schlafzimmer
       - alias: >-
           Nachtschicht - LETZTES NETZ: Heimkehr 04:00-09:00, auch ohne
           erkannte Schicht Rolladen zu
@@ -428,23 +459,40 @@ actions:
               {{ heimkehr_nacht_von <= now().strftime('%H:%M')
                  < heimkehr_nacht_bis }}
         sequence:
-          - action: cover.close_cover
-            target:
-              entity_id: cover.schlafzimmer
-          # Modus mitsetzen, damit auch Aufwach-Erkennung und
-          # Sicherheitsnetz um 16:00 greifen.
+          # Modus zuerst und immer setzen - unabhängig davon, ob der Rolladen
+          # gerade schließen kann. Daran hängen Aufwach-Erkennung und das
+          # 16:00-Netz.
           - action: input_select.select_option
             target:
               entity_id: input_select.schichtmodus_schlafzimmer
             data:
               option: nacht
-          - action: logbook.log
-            data:
-              name: Schichterkennung Schlafzimmer
-              message: >-
-                Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte
-                Nachtschicht - Tagschlaf angenommen, Rolladen zu und Modus
-                auf "nacht" gesetzt.
+          - choose:
+              # Klimaanlage läuft -> Abluftschlauch im Fenster, es kann nicht
+              # geschlossen werden. Der Klima-Zweig holt es nach.
+              - conditions:
+                  - condition: state
+                    entity_id: switch.153931628878753_power
+                    state: "on"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Schichterkennung Schlafzimmer
+                      message: >-
+                        Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte
+                        Nachtschicht - Modus auf "nacht" gesetzt. Rolladen
+                        bleibt vorerst offen, weil die Klimaanlage läuft.
+            default:
+              - action: cover.close_cover
+                target:
+                  entity_id: cover.schlafzimmer
+              - action: logbook.log
+                data:
+                  name: Schichterkennung Schlafzimmer
+                  message: >-
+                    Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte
+                    Nachtschicht - Tagschlaf angenommen, Rolladen zu und Modus
+                    auf "nacht" gesetzt.
       - alias: Nachtschicht - Aufwachen erkannt (Bewegung), Rolladen hoch
         conditions:
           - condition: trigger

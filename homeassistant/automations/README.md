@@ -157,6 +157,31 @@ Rolladen in jedem Fall.
 > das im Betrieb öfter auf, wäre der Ansatzpunkt, zusätzlich zu verlangen, dass
 > vorher überhaupt eine Abwesenheit von mehreren Stunden lag.
 
+### Klimaanlage: Abluftschlauch im Fenster
+
+Das mobile Klimagerät führt seinen Abluftschlauch durchs Fenster — der Rolladen
+kann physisch nicht schließen, solange es läuft. Die ursprüngliche Automation
+kannte diese Ausnahme nur beim Schließen zum Sonnenuntergang. Die
+Nachtschicht-Zweige schlossen bedingungslos, wären also bei ihrer Ankunft um
+06:30 auf den Schlauch gefahren. Dass das bisher nie passiert ist, liegt nur
+daran, dass die Nachtschicht-Erkennung nie ausgelöst hat.
+
+Jetzt setzen **alle** schließenden Zweige aus, wenn die Anlage an ist:
+
+| Zweig | Klimaanlage berücksichtigt |
+| --- | --- |
+| Sonnenuntergang | ja (war schon so) |
+| Heimkehr aus der Nachtschicht | ja (neu) |
+| Letztes Netz (Heimkehr 04:00–09:00) | ja (neu) |
+| Zwangs-Schließen im Heimkehr-Fenster | ja (neu) |
+| Klimaanlage ausgeschaltet | entfällt — Anlage ist dann aus |
+
+Der Schichtmodus wird davon nie blockiert: er wird auch dann gesetzt, wenn der
+Rolladen gerade nicht zufahren kann. Jeder ausgesetzte Schließvorgang landet im
+Logbuch — läuft die Anlage durch, während sie schlafen will, steht dort, warum
+es hell bleibt. Wer das aktiv gemeldet haben möchte, kann in diesen Zweigen
+neben `logbook.log` eine `notify.*`-Aktion ergänzen.
+
 ### Klimaanlage: Nachschließen funktionierte nach Mitternacht nicht
 
 Läuft die Klimaanlage zum Sonnenuntergang, wird das Schließen ausgesetzt und
