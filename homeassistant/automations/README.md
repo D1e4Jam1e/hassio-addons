@@ -157,6 +157,18 @@ Rolladen in jedem Fall.
 > das im Betrieb öfter auf, wäre der Ansatzpunkt, zusätzlich zu verlangen, dass
 > vorher überhaupt eine Abwesenheit von mehreren Stunden lag.
 
+### Klimaanlage: Nachschließen funktionierte nach Mitternacht nicht
+
+Läuft die Klimaanlage zum Sonnenuntergang, wird das Schließen ausgesetzt und
+erst nachgeholt, wenn sie ausgeschaltet wird. Die Bedingung dafür war
+`condition: sun / after: sunset` — und die ist **nur zwischen Sonnenuntergang
+und Mitternacht** wahr. Nach Mitternacht bezieht sie sich bereits auf den
+Sonnenuntergang des neuen Tages und wird falsch. Wurde die Klimaanlage also um
+01:00 ausgeschaltet, blieb der Rolladen bis zum Morgen offen.
+
+Jetzt wird `after: sunset` **oder** `before: sunrise` geprüft, also beide
+Hälften der Nacht.
+
 ### Zweiter Erkennungsweg: Anwesenheitsprüfung
 
 Das Betreten der Zone ist ein **einmaliges Ereignis**. Geht es verloren (GPS

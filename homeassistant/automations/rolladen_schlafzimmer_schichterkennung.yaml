@@ -612,8 +612,18 @@ actions:
         conditions:
           - condition: trigger
             id: klima_aus
-          - condition: sun
-            after: sunset
+          # "after: sunset" allein ist nur zwischen Sonnenuntergang und
+          # Mitternacht wahr - nach Mitternacht bezieht sich die Bedingung
+          # schon auf den Sonnenuntergang des NEUEN Tages und ist falsch.
+          # Wird die Klimaanlage also um 01:00 ausgeschaltet, bliebe der
+          # Rolladen bis zum Morgen offen. Deshalb beide Hälften der Nacht
+          # abfragen.
+          - condition: or
+            conditions:
+              - condition: sun
+                after: sunset
+              - condition: sun
+                before: sunrise
         sequence:
           - action: cover.close_cover
             target:
