@@ -2,13 +2,23 @@ alias: Rolladen Schlafzimmer (Schichterkennung über Standort)
 description: >
   Automatische Schichterkennung ohne manuelle Eingaben, für cover.schlafzimmer.
   Ersetzt Nachtschicht-Logik aus Homee (dort: Ankunft zuhause zwischen
-  05:00-07:00), jetzt zuverlässiger über Anwesenheit in zone.arbeit zu
-  bestimmten Uhrzeiten.
+  05:00-07:00), jetzt zuverlässiger über das Betreten von zone.arbeit.
 
-  SCHICHTERKENNUNG (bei Betreten von zone.arbeit):
-    23:00-05:00 -> Nachtschicht
-    14:00-22:00 -> Spätschicht
-    07:00-12:00 -> Frühschicht (nur informativ, keine Rolladen-Wirkung)
+  SCHICHTERKENNUNG (beim BETRETEN von zone.arbeit):
+    Der Zeitpunkt der ANKUNFT bei der Arbeit wird dem nächstgelegenen
+    offiziellen Schichtbeginn zugeordnet (3-Schicht-System):
+      frueh -> 06:00 | spaet -> 14:00 | nacht -> 22:00
+    Es zählt der zeitlich nächste Start, mit einer Toleranz von 3 Stunden.
+    Dadurch spielt es keine Rolle, ob sie eine halbe Stunde früher oder
+    später ankommt - es gibt keine starren Fenstergrenzen mehr, mitten in
+    denen die Erkennung ausfällt. Ankunft zwischen:
+      03:00-09:00 -> frueh | 11:00-17:00 -> spaet | 19:00-01:00 -> nacht
+    Liegt die Ankunft weiter als 3 h neben jedem Schichtbeginn
+    (01:00-03:00, 09:00-11:00, 17:00-19:00), bleibt der Modus unverändert
+    und es wird ein Logbuch-Eintrag geschrieben - besser kein Modus als
+    der falsche.
+    Schichtzeiten ändern sich? Nur die Variablen "schicht_starts" und
+    "schicht_toleranz" anpassen, alles andere ergibt sich daraus.
 
   WICHTIG zur Erkennung: der State von person.nancy_hiller ist beim Betreten
   einer Zone NICHT die Entity-ID der Zone ("arbeit"), sondern der ANZEIGENAME
@@ -41,7 +51,8 @@ description: >
   FRÜHSCHICHT:
     Aktuell nur zur Erkennung/für spätere Zwecke, keine eigene
     Rolladen-Wirkung - läuft normal nach der oben beschriebenen
-    07:00/09:00-Grenze.
+    07:00/09:00-Grenze. Der Modus wird nach dem morgendlichen Öffnen
+    zurückgesetzt, damit er nicht endlos stehen bleibt.
 
   Abends (Sonnenuntergang) schließt der Rolladen normal, unabhängig vom
   Schichtmodus - ABER: läuft die Klimaanlage (switch.153931628878753_power) zu
@@ -118,6 +129,16 @@ actions:
         {{ now().isoweekday() in [6, 7] or
         is_state('input_boolean.urlaubsmodus_schlafzimmer', 'on') }}
       normal_boundary: "{{ '09:00' if sleep_in else '07:00' }}"
+      # ---- Schichtzeiten: HIER anpassen, wenn sich die Schichten ändern ----
+      # Offizieller Beginn jeder Schicht als Stunde (Dezimal, z.B. 5.5 = 05:30).
+      schicht_starts:
+        frueh: 6
+        spaet: 14
+        nacht: 22
+      # Wie weit darf die Ankunft vom Schichtbeginn abweichen (in Stunden),
+      # damit sie noch dieser Schicht zugeordnet wird.
+      schicht_toleranz: 3
+      # ----------------------------------------------------------------------
       # Alle Schreibweisen, unter denen "zone.arbeit" im State der Person
       # auftauchen kann: der Anzeigename der Zone und die Entity-ID.
       arbeit_namen: >
@@ -134,48 +155,45 @@ actions:
       arbeit_betreten: >
         {{ trigger.id == 'zone_arbeit_enter'
            or (ist_bei_arbeit and not war_bei_arbeit) }}
+      # Ankunftszeit dem zeitlich nächsten Schichtbeginn zuordnen. Der Abstand
+      # wird über Mitternacht hinweg gerechnet (-12 h .. +12 h), damit z.B.
+      # 23:30 korrekt zur Nachtschicht (22:00) und nicht zur Frühschicht zählt.
+      erkannte_schicht: >
+        {% set t = now().hour + now().minute / 60 %}
+        {% set ns = namespace(name='keine', dist=99) %}
+        {% for name, start in schicht_starts.items() %}
+          {% set abstand = ((((t - start + 12) % 24) - 12) | abs) %}
+          {% if abstand < ns.dist %}
+            {% set ns.dist = abstand %}
+            {% set ns.name = name %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.name if ns.dist <= schicht_toleranz else 'keine' }}
   - choose:
-      - alias: Schichterkennung - Nachtschicht (23:00-05:00 in zone.arbeit)
+      - alias: Schichterkennung - Ankunft bei der Arbeit auswerten
         conditions:
           - condition: template
             value_template: "{{ arbeit_betreten }}"
-          - condition: time
-            after: "23:00:00"
-            before: "05:00:00"
         sequence:
-          - action: input_select.select_option
-            target:
-              entity_id: input_select.schichtmodus_schlafzimmer
-            data:
-              option: nacht
-      - alias: Schichterkennung - Spätschicht (14:00-22:00 in zone.arbeit)
-        conditions:
-          - condition: template
-            value_template: "{{ arbeit_betreten }}"
-          - condition: time
-            after: "14:00:00"
-            before: "22:00:00"
-        sequence:
-          - action: input_select.select_option
-            target:
-              entity_id: input_select.schichtmodus_schlafzimmer
-            data:
-              option: spaet
-      - alias: Schichterkennung - Frühschicht (05:00-12:00 in zone.arbeit)
-        conditions:
-          - condition: template
-            value_template: "{{ arbeit_betreten }}"
-          # Fenster startet um 05:00, damit zwischen dem Nachtschicht-Fenster
-          # (endet 05:00) und dem Frühschicht-Fenster keine Lücke bleibt.
-          - condition: time
-            after: "05:00:00"
-            before: "12:00:00"
-        sequence:
-          - action: input_select.select_option
-            target:
-              entity_id: input_select.schichtmodus_schlafzimmer
-            data:
-              option: frueh
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ erkannte_schicht != 'keine' }}"
+                sequence:
+                  - action: input_select.select_option
+                    target:
+                      entity_id: input_select.schichtmodus_schlafzimmer
+                    data:
+                      option: "{{ erkannte_schicht }}"
+            default:
+              - action: logbook.log
+                data:
+                  name: Schichterkennung Schlafzimmer
+                  message: >-
+                    Ankunft bei der Arbeit um {{ now().strftime('%H:%M') }} -
+                    keinem Schichtbeginn innerhalb von {{ schicht_toleranz }} h
+                    zuzuordnen. Modus bleibt auf
+                    "{{ states('input_select.schichtmodus_schlafzimmer') }}".
       - alias: Nachtschicht - Ankunft zuhause, Rolladen sofort zu
         conditions:
           - condition: trigger
@@ -236,16 +254,13 @@ actions:
           - action: cover.open_cover
             target:
               entity_id: cover.schlafzimmer
-          - if:
-              - condition: state
-                entity_id: input_select.schichtmodus_schlafzimmer
-                state: spaet
-            then:
-              - action: input_select.select_option
-                target:
-                  entity_id: input_select.schichtmodus_schlafzimmer
-                data:
-                  option: keine
+          # Kann hier nur "keine", "frueh" oder "spaet" sein - alle drei sind
+          # nach dem morgendlichen Öffnen erledigt.
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
       - alias: >-
           Hochfahren - Boden-Zeit 07:00 (Werktag, weder Nacht- noch Spätschicht,
           kein Urlaub)
@@ -270,6 +285,11 @@ actions:
           - action: cover.open_cover
             target:
               entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
       - alias: >-
           Hochfahren - Boden-Zeit 09:00 (Wochenende oder Urlaub, weder Nacht-
           noch Spätschicht)
@@ -294,6 +314,11 @@ actions:
           - action: cover.open_cover
             target:
               entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
       - alias: >-
           Hochfahren - Boden-Zeit 10:00 (Spätschicht, falls Sonnenaufgang früher
           war)

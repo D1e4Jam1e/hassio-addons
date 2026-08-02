@@ -29,10 +29,38 @@ Automatisierung → ⋮ → In YAML bearbeiten* und den Inhalt der Datei einfüg
    dass der vorherige State *nicht* schon "Arbeit" war (echtes Betreten statt
    Attribut-Update).
 
-4. **Zeitlücke 05:00–07:00.** Nachtschicht-Fenster endete um 05:00, das
-   Frühschicht-Fenster begann erst um 07:00 — eine Ankunft bei der Arbeit
-   dazwischen (typischer Frühschichtbeginn) setzte gar keinen Modus. Das
-   Frühschicht-Fenster beginnt jetzt um 05:00.
+4. **Zeitfenster lagen neben der Ankunft.** Der Trigger feuert beim *Betreten*
+   der Zone, also zum Schichtbeginn — bei einer Nachtschicht 22:00–06:00 also
+   gegen 21:45. Die Fenster (`23:00-05:00`, `14:00-22:00`, `07:00-12:00`)
+   beschrieben aber die Schicht*dauer*, nicht die Ankunft. Selbst mit korrektem
+   Zonen-State hätte die Nachtschicht-Erkennung nie gegriffen, weil 21:45 vor
+   dem Fensterbeginn 23:00 liegt.
+
+### Neue Erkennungslogik
+
+Statt starrer Fenster wird die Ankunftszeit dem **zeitlich nächsten
+Schichtbeginn** zugeordnet (Toleranz 3 h):
+
+| Ankunft bei der Arbeit | Modus |
+| --- | --- |
+| 03:00–09:00 | `frueh` (Start 06:00) |
+| 11:00–17:00 | `spaet` (Start 14:00) |
+| 19:00–01:00 | `nacht` (Start 22:00) |
+| 01:00–03:00, 09:00–11:00, 17:00–19:00 | unverändert + Logbuch-Eintrag |
+
+Damit sind Abweichungen von einer halben oder ganzen Stunde egal, und es gibt
+keine Fenstergrenze mehr, an der die Erkennung stillschweigend ausfällt. Passen
+die Schichtzeiten nicht, reicht es, oben in der Automation die Variablen
+`schicht_starts` (Beginn je Schicht, Dezimalstunden — `5.5` = 05:30) und
+`schicht_toleranz` anzupassen.
+
+Angenommen wurde das klassische 3-Schicht-System 06:00 / 14:00 / 22:00, passend
+zur genannten Nachtschicht 22:00–06:00.
+
+5. **`frueh` blieb ewig stehen.** Der Modus `frueh` wurde nirgends
+   zurückgesetzt. Er hat zwar keine Rolladen-Wirkung, blieb aber bis zur
+   nächsten erkannten Schicht stehen. Er wird jetzt nach dem morgendlichen
+   Öffnen auf `keine` zurückgesetzt.
 
 ### Voraussetzungen
 
