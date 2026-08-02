@@ -355,6 +355,14 @@ actions:
               - condition: state
                 entity_id: cover.schlafzimmer
                 state: closed
+          # Gleiche Ausnahme wie beim Schließen zum Sonnenuntergang: läuft
+          # die Klimaanlage, wird nicht zugefahren. Sobald sie ausgeht,
+          # schließt der Klima-Zweig nach.
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: switch.153931628878753_power
+                state: "on"
         sequence:
           - action: cover.close_cover
             target:
