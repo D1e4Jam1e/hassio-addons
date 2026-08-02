@@ -1,0 +1,347 @@
+alias: Rolladen Schlafzimmer (Schichterkennung über Standort)
+description: >
+  Automatische Schichterkennung ohne manuelle Eingaben, für cover.schlafzimmer.
+  Ersetzt Nachtschicht-Logik aus Homee (dort: Ankunft zuhause zwischen
+  05:00-07:00), jetzt zuverlässiger über Anwesenheit in zone.arbeit zu
+  bestimmten Uhrzeiten.
+
+  SCHICHTERKENNUNG (bei Betreten von zone.arbeit):
+    23:00-05:00 -> Nachtschicht
+    14:00-22:00 -> Spätschicht
+    07:00-12:00 -> Frühschicht (nur informativ, keine Rolladen-Wirkung)
+
+  WICHTIG zur Erkennung: der State von person.nancy_hiller ist beim Betreten
+  einer Zone NICHT die Entity-ID der Zone ("arbeit"), sondern der ANZEIGENAME
+  der Zone (z.B. "Arbeit"). Deshalb wird hier auf den Zone-Trigger plus einen
+  case-insensitiven Vergleich gegen den Anzeigenamen von zone.arbeit geprüft.
+
+  NACHTSCHICHT:
+    Ankunft zuhause (person.nancy_hiller -> home) während Modus "nacht"
+      -> Rolladen SOFORT zu (Tagschlaf).
+    Anhaltende Bewegung im WiFa-Flur (binary_sensor.bewegung_wifa_occupancy,
+      10 Min. durchgehend) während Modus "nacht" -> Rolladen hoch, Modus
+      zurück auf "keine".
+    SICHERHEITSNETZ: falls bis 16:00 Uhr noch kein Aufwachen erkannt
+      wurde, öffnet der Rolladen trotzdem automatisch und der Modus wird
+      zurückgesetzt.
+
+  SPÄTSCHICHT:
+    Morgens öffnet der Rolladen erst ab 10:00 Uhr (statt der normalen
+    Grenze) - "soll ja nicht den ganzen Tag schlafen". Sonnenaufgang
+    zählt weiterhin, falls der später als 10:00 liegt. Modus wird nach
+    dem Öffnen zurückgesetzt.
+
+  NORMAL (kein Schichtmodus aktiv):
+    Öffnungsgrenze ist 07:00 an Werktagen, aber 09:00 am Wochenende
+    (Sa/So) ODER wenn Urlaubsmodus aktiv ist (input_boolean.
+    urlaubsmodus_schlafzimmer) - damit es am Wochenende/im Urlaub nicht
+    schon um 7 Uhr hell wird. Sonnenaufgang zählt weiterhin, falls der
+    später als die jeweilige Grenze liegt.
+
+  FRÜHSCHICHT:
+    Aktuell nur zur Erkennung/für spätere Zwecke, keine eigene
+    Rolladen-Wirkung - läuft normal nach der oben beschriebenen
+    07:00/09:00-Grenze.
+
+  Abends (Sonnenuntergang) schließt der Rolladen normal, unabhängig vom
+  Schichtmodus - ABER: läuft die Klimaanlage (switch.153931628878753_power) zu
+  diesem Zeitpunkt, wird das Schließen ausgesetzt. Sobald die Klimaanlage später
+  ausgeschaltet wird und der reguläre Schließzeitpunkt (Sonnenuntergang) schon
+  vorbei ist, schließt der Rolladen dann sofort nach.
+
+  Voraussetzung:
+    - Helfer input_select.schichtmodus_schlafzimmer anlegen, Optionen:
+      keine, frueh, spaet, nacht (Startwert: keine)
+    - Helfer input_boolean.urlaubsmodus_schlafzimmer anlegen - manuell
+      vor/nach dem Urlaub an-/ausschalten
+    - zone.arbeit muss existieren; person.nancy_hiller muss einen
+      GPS-fähigen device_tracker haben (App/Companion), damit die Zone
+      überhaupt erkannt wird
+triggers:
+  # Primär: echter Zone-Trigger (funktioniert unabhängig vom Anzeigenamen der
+  # Zone, setzt aber GPS-Koordinaten am Tracker voraus).
+  - trigger: zone
+    entity_id: person.nancy_hiller
+    zone: zone.arbeit
+    event: enter
+    id: zone_arbeit_enter
+  # Fallback: State-Wechsel der Person auf einen Zonennamen. "not_from" filtert
+  # unknown/unavailable heraus, damit ein Neustart von Home Assistant keine
+  # Schicht fälschlich erkennt.
+  - trigger: state
+    entity_id: person.nancy_hiller
+    not_to:
+      - home
+      - not_home
+      - unknown
+      - unavailable
+    not_from:
+      - unknown
+      - unavailable
+    id: person_zonenwechsel
+  - trigger: state
+    entity_id: person.nancy_hiller
+    to: home
+    id: arrived_home
+  - trigger: state
+    entity_id: binary_sensor.bewegung_wifa_occupancy
+    to: "on"
+    for:
+      minutes: 10
+    id: wake_motion
+  - trigger: time
+    at: "16:00:00"
+    id: safety_net_open
+  - trigger: sun
+    event: sunrise
+    id: sunrise
+  - trigger: time
+    at: "07:00:00"
+    id: floor_up_normal
+  - trigger: time
+    at: "09:00:00"
+    id: floor_up_weekend
+  - trigger: time
+    at: "10:00:00"
+    id: floor_up_spaet
+  - trigger: sun
+    event: sunset
+    id: sunset
+  - trigger: state
+    entity_id: switch.153931628878753_power
+    to: "off"
+    id: klima_aus
+conditions: []
+actions:
+  - variables:
+      sleep_in: >
+        {{ now().isoweekday() in [6, 7] or
+        is_state('input_boolean.urlaubsmodus_schlafzimmer', 'on') }}
+      normal_boundary: "{{ '09:00' if sleep_in else '07:00' }}"
+      # Alle Schreibweisen, unter denen "zone.arbeit" im State der Person
+      # auftauchen kann: der Anzeigename der Zone und die Entity-ID.
+      arbeit_namen: >
+        {{ [ state_attr('zone.arbeit', 'friendly_name') | default('Arbeit', true),
+             'arbeit' ] | map('lower') | list }}
+      war_bei_arbeit: >
+        {{ trigger.from_state is defined and trigger.from_state is not none
+           and trigger.from_state.state | lower in arbeit_namen }}
+      ist_bei_arbeit: >
+        {{ trigger.to_state is defined and trigger.to_state is not none
+           and trigger.to_state.state | lower in arbeit_namen }}
+      # True nur beim tatsächlichen Betreten (Zone-Trigger oder Wechsel von
+      # "woanders" nach "Arbeit") - nicht bei reinen Attribut-Updates.
+      arbeit_betreten: >
+        {{ trigger.id == 'zone_arbeit_enter'
+           or (ist_bei_arbeit and not war_bei_arbeit) }}
+  - choose:
+      - alias: Schichterkennung - Nachtschicht (23:00-05:00 in zone.arbeit)
+        conditions:
+          - condition: template
+            value_template: "{{ arbeit_betreten }}"
+          - condition: time
+            after: "23:00:00"
+            before: "05:00:00"
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: nacht
+      - alias: Schichterkennung - Spätschicht (14:00-22:00 in zone.arbeit)
+        conditions:
+          - condition: template
+            value_template: "{{ arbeit_betreten }}"
+          - condition: time
+            after: "14:00:00"
+            before: "22:00:00"
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: spaet
+      - alias: Schichterkennung - Frühschicht (05:00-12:00 in zone.arbeit)
+        conditions:
+          - condition: template
+            value_template: "{{ arbeit_betreten }}"
+          # Fenster startet um 05:00, damit zwischen dem Nachtschicht-Fenster
+          # (endet 05:00) und dem Frühschicht-Fenster keine Lücke bleibt.
+          - condition: time
+            after: "05:00:00"
+            before: "12:00:00"
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: frueh
+      - alias: Nachtschicht - Ankunft zuhause, Rolladen sofort zu
+        conditions:
+          - condition: trigger
+            id: arrived_home
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: Nachtschicht - Aufwachen erkannt (Bewegung), Rolladen hoch
+        conditions:
+          - condition: trigger
+            id: wake_motion
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: >-
+          Nachtschicht - Sicherheitsnetz 16:00 (falls keine Bewegung erkannt
+          wurde)
+        conditions:
+          - condition: trigger
+            id: safety_net_open
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: >-
+          Hochfahren - Sonnenaufgang (normal ab 07:00/09:00, Spätschicht ab
+          10:00)
+        conditions:
+          - condition: trigger
+            id: sunrise
+          - condition: template
+            value_template: >-
+              {% set m = states('input_select.schichtmodus_schlafzimmer') %}
+              {{ m != 'nacht' and now().strftime('%H:%M') >=
+                 ('10:00' if m == 'spaet' else normal_boundary) }}
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - if:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: spaet
+            then:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.schichtmodus_schlafzimmer
+                data:
+                  option: keine
+      - alias: >-
+          Hochfahren - Boden-Zeit 07:00 (Werktag, weder Nacht- noch Spätschicht,
+          kein Urlaub)
+        conditions:
+          - condition: trigger
+            id: floor_up_normal
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: nacht
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: spaet
+          - condition: template
+            value_template: "{{ not sleep_in }}"
+          - condition: sun
+            after: sunrise
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: >-
+          Hochfahren - Boden-Zeit 09:00 (Wochenende oder Urlaub, weder Nacht-
+          noch Spätschicht)
+        conditions:
+          - condition: trigger
+            id: floor_up_weekend
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: nacht
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: spaet
+          - condition: template
+            value_template: "{{ sleep_in }}"
+          - condition: sun
+            after: sunrise
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: >-
+          Hochfahren - Boden-Zeit 10:00 (Spätschicht, falls Sonnenaufgang früher
+          war)
+        conditions:
+          - condition: trigger
+            id: floor_up_spaet
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: spaet
+          - condition: sun
+            after: sunrise
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: Runterfahren - Sonnenuntergang (nicht wenn Klima läuft)
+        conditions:
+          - condition: trigger
+            id: sunset
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: switch.153931628878753_power
+                state: "on"
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: >-
+          Klima ausgeschaltet - Rolladen nachträglich schließen (falls
+          Sonnenuntergang schon vorbei)
+        conditions:
+          - condition: trigger
+            id: klima_aus
+          - condition: sun
+            after: sunset
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+# queued statt restart: die Automation hat viele unabhängige Trigger. Bei
+# "restart" bricht ein neuer Trigger (z.B. Sonnenuntergang) einen gerade
+# laufenden Ablauf (z.B. Schichterkennung) mittendrin ab.
+mode: queued
+max: 10
+max_exceeded: silent
