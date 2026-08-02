@@ -37,12 +37,25 @@ description: >
   der Zone (z.B. "Arbeit"). Deshalb wird hier auf den Zone-Trigger plus einen
   case-insensitiven Vergleich gegen den Anzeigenamen von zone.arbeit geprüft.
 
-  NACHTSCHICHT:
+  NACHTSCHICHT (kritischster Teil - der Rolladen darf nach der
+  Nachtschicht auf keinen Fall zu früh öffnen; zu spät öffnen ist
+  dagegen harmlos, deshalb sind alle Regeln hier in diese Richtung
+  ausgelegt):
     Ankunft zuhause (person.nancy_hiller -> home) während Modus "nacht"
       -> Rolladen SOFORT zu (Tagschlaf).
+    LETZTES NETZ: Heimkehr zwischen 04:00 und 08:00 schliesst den
+      Rolladen auch dann, wenn die Schichterkennung komplett versagt hat,
+      und setzt den Modus auf "nacht" nach (entspricht der alten
+      Homee-Logik). Damit greifen auch Aufwach-Erkennung und das
+      16:00-Netz. Ein zu Unrecht gesetzter Nachtmodus kostet nichts - er
+      wird spätestens um 16:00 wieder zurückgesetzt.
     Anhaltende Bewegung im WiFa-Flur (binary_sensor.bewegung_wifa_occupancy,
       10 Min. durchgehend) während Modus "nacht" -> Rolladen hoch, Modus
       zurück auf "keine".
+      ABER erst ab 11:00 ("aufwach_fruehestens"): sonst würde schon das
+      Ankommen und Herumräumen nach der Schicht (06:30) oder ein kurzer
+      Gang zur Toilette den Rolladen mitten im Tagschlaf öffnen. Wer vor
+      11:00 aufsteht, wartet auf das 16:00-Netz oder öffnet von Hand.
     SICHERHEITSNETZ: falls bis 16:00 Uhr noch kein Aufwachen erkannt
       wurde, öffnet der Rolladen trotzdem automatisch und der Modus wird
       zurückgesetzt.
@@ -168,6 +181,21 @@ actions:
       # je eine Stunde Puffer für Anfahrt und Überstunden.
       kern_von: 1
       kern_bis: 7
+      # --- Absicherung für die kritische Richtung ---
+      # Kritisch ist NUR: der Rolladen öffnet nach der Nachtschicht zu früh.
+      # Zu spät öffnen oder ein überflüssig gesetzter Nachtmodus kosten
+      # nichts - deshalb sind die beiden folgenden Regeln bewusst
+      # großzügig ausgelegt.
+      #
+      # Kommt sie in diesem Fenster nach Hause, wird Tagschlaf angenommen,
+      # auch wenn die Schichterkennung vorher versagt hat (entspricht der
+      # alten Homee-Logik). Fenster = Nachtschicht-Ende +/- 2 h.
+      heimkehr_nacht_von: "04:00"
+      heimkehr_nacht_bis: "08:00"
+      # Vor dieser Uhrzeit zählt Bewegung NICHT als Aufwachen. Schützt
+      # gegen kurzes Aufstehen (Toilette) und gegen andere Personen im
+      # Flur. Nach hinten sichert das Sicherheitsnetz um 16:00 ab.
+      aufwach_fruehestens: "11:00"
       # ----------------------------------------------------------------------
       # Alle Schreibweisen, unter denen "zone.arbeit" im State der Person
       # auftauchen kann: der Anzeigename der Zone und die Entity-ID.
@@ -276,6 +304,41 @@ actions:
           - action: cover.close_cover
             target:
               entity_id: cover.schlafzimmer
+      - alias: >-
+          Nachtschicht - LETZTES NETZ: Heimkehr 04:00-08:00, auch ohne
+          erkannte Schicht Rolladen zu
+        conditions:
+          - condition: trigger
+            id: arrived_home
+          # Greift für jeden Modus ausser "nacht" - der ist oben schon
+          # abgehandelt.
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: nacht
+          - condition: template
+            value_template: >-
+              {{ heimkehr_nacht_von <= now().strftime('%H:%M')
+                 < heimkehr_nacht_bis }}
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+          # Modus mitsetzen, damit auch Aufwach-Erkennung und
+          # Sicherheitsnetz um 16:00 greifen.
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: nacht
+          - action: logbook.log
+            data:
+              name: Schichterkennung Schlafzimmer
+              message: >-
+                Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte
+                Nachtschicht - Tagschlaf angenommen, Rolladen zu und Modus
+                auf "nacht" gesetzt.
       - alias: Nachtschicht - Aufwachen erkannt (Bewegung), Rolladen hoch
         conditions:
           - condition: trigger
@@ -283,6 +346,12 @@ actions:
           - condition: state
             entity_id: input_select.schichtmodus_schlafzimmer
             state: nacht
+          # Vor "aufwach_fruehestens" gilt Bewegung nicht als Aufwachen -
+          # sonst reicht ein kurzer Gang zur Toilette, um den Rolladen
+          # mitten im Tagschlaf zu öffnen.
+          - condition: template
+            value_template: >-
+              {{ now().strftime('%H:%M') >= aufwach_fruehestens }}
         sequence:
           - action: cover.open_cover
             target:

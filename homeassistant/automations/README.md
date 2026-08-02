@@ -57,6 +57,44 @@ die Schichtzeiten nicht, reicht es, oben in der Automation die Variablen
 Angenommen wurde das klassische 3-Schicht-System 06:00 / 14:00 / 22:00, passend
 zur genannten Nachtschicht 22:00–06:00.
 
+### Die kritische Richtung: Rolladen öffnet nach der Nachtschicht zu früh
+
+Zu spät öffnen ist harmlos (Rolladen von Hand hoch), zu früh öffnen weckt sie
+mitten im Tagschlaf. Alle Regeln sind deshalb in diese Richtung ausgelegt — ein
+zu Unrecht gesetzter Nachtmodus kostet nichts, er wird spätestens um 16:00
+zurückgesetzt. Drei Schichten Absicherung:
+
+1. **Ankunft bei der Arbeit** (~21:45) setzt `nacht`.
+2. **Anwesenheitsprüfung** alle 30 Min. zwischen 23:00 und 05:00 — fängt es auf,
+   wenn das Ankunfts-Ereignis verlorenging.
+3. **Letztes Netz: Heimkehr zwischen 04:00 und 08:00** schließt den Rolladen
+   auch dann, wenn beide vorherigen Wege versagt haben, und setzt `nacht` nach
+   (entspricht der alten Homee-Logik). Damit greifen auch Aufwach-Erkennung und
+   das 16:00-Netz. Fenster über `heimkehr_nacht_von` / `heimkehr_nacht_bis`.
+
+Sechs Zweige können den Rolladen öffnen — alle sind bei Modus `nacht`
+blockiert; nur die Aufwach-Erkennung und das 16:00-Netz kommen durch.
+
+#### Aufwach-Erkennung erst ab 11:00
+
+`binary_sensor.bewegung_wifa_occupancy` 10 Minuten durchgehend `on` galt bisher
+jederzeit als Aufwachen. Das ist genau in der kritischen Richtung gefährlich:
+sie kommt um 06:30 nach Hause, räumt auf und geht durch den Flur — nach 10
+Minuten wäre der Rolladen wieder hochgefahren, direkt nachdem er geschlossen
+hat. Bewegung zählt deshalb erst ab `aufwach_fruehestens` (11:00) als
+Aufwachen. Auch ein kurzer Gang zur Toilette und andere Personen im Flur fallen
+damit raus.
+
+Preis dafür: steht sie um 10:30 auf, bleibt es dunkel bis 16:00 oder bis sie von
+Hand öffnet. Nach deiner Priorisierung der bessere Fehler.
+
+> **Bitte prüfen:** wie lange bleibt `binary_sensor.bewegung_wifa_occupancy`
+> nach der letzten Bewegung noch `on` (bei Zigbee-Meldern oft
+> `occupancy_timeout`)? Liegt der Wert bei 10 Minuten oder darüber, ist die
+> Bedingung „10 Minuten durchgehend" praktisch bedeutungslos — dann reicht eine
+> einzelne Bewegung, und die Zeitsperre ab 11:00 ist der einzige Schutz. In dem
+> Fall die 10 Minuten im Trigger `wake_motion` deutlich höher setzen.
+
 ### Zweiter Erkennungsweg: Anwesenheitsprüfung
 
 Das Betreten der Zone ist ein **einmaliges Ereignis**. Geht es verloren (GPS
