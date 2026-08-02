@@ -75,25 +75,42 @@ zurückgesetzt. Drei Schichten Absicherung:
 Sechs Zweige können den Rolladen öffnen — alle sind bei Modus `nacht`
 blockiert; nur die Aufwach-Erkennung und das 16:00-Netz kommen durch.
 
-#### Aufwach-Erkennung erst ab 11:00
+#### Sperrfrist für die Aufwach-Erkennung
 
 `binary_sensor.bewegung_wifa_occupancy` 10 Minuten durchgehend `on` galt bisher
-jederzeit als Aufwachen. Das ist genau in der kritischen Richtung gefährlich:
-sie kommt um 06:30 nach Hause, räumt auf und geht durch den Flur — nach 10
-Minuten wäre der Rolladen wieder hochgefahren, direkt nachdem er geschlossen
-hat. Bewegung zählt deshalb erst ab `aufwach_fruehestens` (11:00) als
-Aufwachen. Auch ein kurzer Gang zur Toilette und andere Personen im Flur fallen
-damit raus.
+jederzeit als Aufwachen. Der Melder sitzt unten im Flur und ist als
+Aufwach-Signal gut gewählt — ein Toilettengang kommt da nicht vorbei, dafür
+müsste sie erst die Treppe runter. Kritisch ist nur die **erste Stunde nach der
+Heimkehr**: um 06:30 kommt sie an, räumt auf, macht sich fertig — und genau
+dieser Weg führt durch den Flur. Nach 10 Minuten wäre der Rolladen wieder
+hochgefahren, direkt nachdem er geschlossen hat.
 
-Preis dafür: steht sie um 10:30 auf, bleibt es dunkel bis 16:00 oder bis sie von
-Hand öffnet. Nach deiner Priorisierung der bessere Fehler.
+Bewegung zählt deshalb erst als Aufwachen, wenn beides gilt:
 
-> **Bitte prüfen:** wie lange bleibt `binary_sensor.bewegung_wifa_occupancy`
-> nach der letzten Bewegung noch `on` (bei Zigbee-Meldern oft
-> `occupancy_timeout`)? Liegt der Wert bei 10 Minuten oder darüber, ist die
-> Bedingung „10 Minuten durchgehend" praktisch bedeutungslos — dann reicht eine
-> einzelne Bewegung, und die Zeitsperre ab 11:00 ist der einzige Schutz. In dem
-> Fall die 10 Minuten im Trigger `wake_motion` deutlich höher setzen.
+| Sperre | Standard | Zweck |
+| --- | --- | --- |
+| `aufwach_mindestschlaf` | 3 h zuhause | deckt die Ankunfts-/Aufräumphase ab |
+| `aufwach_fruehestens` | 09:00 | Plausibilität, falls sie deutlich früher heimkommt |
+
+Bei Heimkehr um 06:30 ist die Erkennung damit ab **09:30** scharf. Die Sperre
+hängt bewusst an der Heimkehr statt an einer festen Uhrzeit — so blockiert sie
+nicht unnötig bis in den Nachmittag, wenn sie mal früher aufsteht. Gemessen wird
+am letzten State-Wechsel von `person.nancy_hiller`; nach einem HA-Neustart
+verschiebt sich der Bezugspunkt nach hinten, also in die sichere Richtung.
+
+> **Bitte nach dem Test prüfen:** wie lange bleibt der Melder nach der letzten
+> Bewegung noch `on` (bei Zigbee-Meldern oft `occupancy_timeout`)? Liegt der
+> Wert bei 10 Minuten oder darüber, ist „10 Minuten durchgehend" praktisch
+> bedeutungslos — dann reicht eine einzelne Bewegung, und die Sperrfrist ist der
+> einzige Schutz. In dem Fall die 10 Minuten im Trigger `wake_motion` erhöhen.
+
+> **Bekannte Lücke (bewusst offen):** der Trigger feuert nur in dem Moment, in
+> dem die Bewegung 10 Minuten erreicht. Steht sie um 09:20 auf — also vor Ablauf
+> der Sperrfrist — feuert er einmal, wird abgelehnt und kommt nicht wieder; dann
+> öffnet erst das 16:00-Netz. Eine regelmäßige Nachprüfung würde das schließen,
+> aber auch bedeuten, dass ein hängender Melder den Rolladen öffnet. Nach der
+> Priorisierung (zu früh öffnen ist fatal, zu spät nicht) bleibt es beim
+> Trigger.
 
 ### Zweiter Erkennungsweg: Anwesenheitsprüfung
 

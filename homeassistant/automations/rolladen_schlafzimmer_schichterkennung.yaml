@@ -52,10 +52,14 @@ description: >
     Anhaltende Bewegung im WiFa-Flur (binary_sensor.bewegung_wifa_occupancy,
       10 Min. durchgehend) während Modus "nacht" -> Rolladen hoch, Modus
       zurück auf "keine".
-      ABER erst ab 11:00 ("aufwach_fruehestens"): sonst würde schon das
-      Ankommen und Herumräumen nach der Schicht (06:30) oder ein kurzer
-      Gang zur Toilette den Rolladen mitten im Tagschlaf öffnen. Wer vor
-      11:00 aufsteht, wartet auf das 16:00-Netz oder öffnet von Hand.
+      ABER erst, wenn sie mindestens 3 h zuhause ist
+      ("aufwach_mindestschlaf") UND es nach 09:00 ist
+      ("aufwach_fruehestens"). Der Melder im WiFa-Flur ist bewusst
+      gewählt - unten, ein Toilettengang kommt da nicht vorbei. Kritisch
+      ist nur die erste Stunde nach der Heimkehr: Aufräumen und
+      Fertigmachen führen durch den Flur und hätten den Rolladen wieder
+      geöffnet, kaum dass er zu war. Bei Heimkehr 06:30 ist die
+      Aufwach-Erkennung damit ab 09:30 scharf.
     SICHERHEITSNETZ: falls bis 16:00 Uhr noch kein Aufwachen erkannt
       wurde, öffnet der Rolladen trotzdem automatisch und der Modus wird
       zurückgesetzt.
@@ -192,10 +196,21 @@ actions:
       # alten Homee-Logik). Fenster = Nachtschicht-Ende +/- 2 h.
       heimkehr_nacht_von: "04:00"
       heimkehr_nacht_bis: "08:00"
-      # Vor dieser Uhrzeit zählt Bewegung NICHT als Aufwachen. Schützt
-      # gegen kurzes Aufstehen (Toilette) und gegen andere Personen im
-      # Flur. Nach hinten sichert das Sicherheitsnetz um 16:00 ab.
-      aufwach_fruehestens: "11:00"
+      # Bewegung zählt erst als Aufwachen, wenn BEIDE Sperren erfüllt sind.
+      # Der WiFa-Flur liegt unten - ein Toilettengang kommt da nicht vorbei,
+      # deshalb ist der Melder als Aufwach-Signal gut gewählt. Das Problem
+      # ist nur die erste Stunde: nach der Heimkehr um ~06:30 wird noch
+      # aufgeräumt und sich fertig gemacht, und genau dieser Weg führt durch
+      # den Flur. Deshalb primär eine Sperre relativ zur Heimkehr statt
+      # einer starren Uhrzeit - so wird ein frühes Aufstehen nicht unnötig
+      # bis 16:00 blockiert.
+      #
+      # Mindestens so viele Stunden muss sie zuhause gewesen sein
+      # (gemessen am letzten State-Wechsel von person.nancy_hiller).
+      aufwach_mindestschlaf: 3
+      # Zusätzliche Plausibilitätsgrenze: vor dieser Uhrzeit nie aufwecken,
+      # falls sie mal deutlich früher heimkommt.
+      aufwach_fruehestens: "09:00"
       # ----------------------------------------------------------------------
       # Alle Schreibweisen, unter denen "zone.arbeit" im State der Person
       # auftauchen kann: der Anzeigename der Zone und die Entity-ID.
@@ -346,9 +361,17 @@ actions:
           - condition: state
             entity_id: input_select.schichtmodus_schlafzimmer
             state: nacht
-          # Vor "aufwach_fruehestens" gilt Bewegung nicht als Aufwachen -
-          # sonst reicht ein kurzer Gang zur Toilette, um den Rolladen
-          # mitten im Tagschlaf zu öffnen.
+          # Sperre 1: sie muss schon eine Weile zuhause sein. Sonst gilt
+          # das Aufräumen/Fertigmachen direkt nach der Heimkehr als
+          # Aufwachen und der Rolladen fährt wieder hoch, kaum dass er zu
+          # ist. Fehlt die Entity, ist das Ergebnis False -> es bleibt beim
+          # Sicherheitsnetz um 16:00.
+          - condition: template
+            value_template: >-
+              {% set p = states.person.nancy_hiller %}
+              {{ p is not none and (now() - p.last_changed).total_seconds()
+                 >= aufwach_mindestschlaf * 3600 }}
+          # Sperre 2: Plausibilitätsgrenze nach Uhrzeit.
           - condition: template
             value_template: >-
               {{ now().strftime('%H:%M') >= aufwach_fruehestens }}
