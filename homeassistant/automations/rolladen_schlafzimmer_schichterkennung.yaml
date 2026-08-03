@@ -8,15 +8,20 @@ description: >
     Der Zeitpunkt der ANKUNFT bei der Arbeit wird dem nächstgelegenen
     offiziellen Schichtbeginn zugeordnet (3-Schicht-System):
       frueh -> 06:00 | spaet -> 14:00 | nacht -> 22:00
-    Es zählt der zeitlich nächste Start, mit einer Toleranz von 3 Stunden.
-    Dadurch spielt es keine Rolle, ob sie eine halbe Stunde früher oder
-    später ankommt - es gibt keine starren Fenstergrenzen mehr, mitten in
-    denen die Erkennung ausfällt. Ankunft zwischen:
-      03:00-09:00 -> frueh | 11:00-17:00 -> spaet | 19:00-01:00 -> nacht
-    Liegt die Ankunft weiter als 3 h neben jedem Schichtbeginn
-    (01:00-03:00, 09:00-11:00, 17:00-19:00), bleibt der Modus unverändert
-    und es wird ein Logbuch-Eintrag geschrieben - besser kein Modus als
-    der falsche.
+    Es zählt der zeitlich nächste Start, mit einer Toleranz von 4 Stunden.
+    Dadurch spielt es keine Rolle, ob sie eine Stunde früher oder später
+    ankommt - es gibt keine starren Fenstergrenzen mehr, mitten in denen
+    die Erkennung ausfällt. Ankunft zwischen:
+      02:00-10:00 -> frueh | 10:00-18:00 -> spaet | 18:00-02:00 -> nacht
+    Die Grenzen liegen damit genau in der Mitte zwischen zwei
+    Schichtbeginnen - also dort, wo niemand zur Arbeit kommt. Praktisch
+    beginnen die Schichten etwa eine Stunde früher als offiziell
+    (beobachtet: Ankunft 19:46 bei offiziellem Beginn 22:00), auch das
+    ist damit abgedeckt.
+    Sollte eine Ankunft doch keiner Schicht zuzuordnen sein - etwa nach
+    Anpassung von "schicht_starts" auf ungleichmäßige Abstände - bleibt
+    der Modus unverändert und es wird ein Logbuch-Eintrag geschrieben:
+    besser kein Modus als der falsche.
     Schichtzeiten ändern sich? Nur die Variablen "schicht_starts" und
     "schicht_toleranz" anpassen, alles andere ergibt sich daraus.
 
@@ -209,7 +214,13 @@ actions:
         nacht: 22
       # Wie weit darf die Ankunft vom Schichtbeginn abweichen (in Stunden),
       # damit sie noch dieser Schicht zugeordnet wird.
-      schicht_toleranz: 3
+      # 4 statt 3, weil die Schichten praktisch etwa eine Stunde früher
+      # beginnen als offiziell: beobachtete Ankunft 19:46 bei offiziellem
+      # Beginn 22:00. Bei 8 Stunden Abstand zwischen den Schichtbeginnen
+      # bedeutet Toleranz 4, dass jede Ankunft zugeordnet wird und die
+      # Grenzen genau in der Mitte zwischen zwei Schichten liegen
+      # (02:00 / 10:00 / 18:00) - also dort, wo niemand ankommt.
+      schicht_toleranz: 4
       # Kernzeit für die Anwesenheitsprüfung: ab wie vielen Stunden nach
       # Schichtbeginn bis wie viele Stunden danach gilt "sie ist mitten in
       # dieser Schicht". Bei 8-Stunden-Schichten lässt 1..7 vorne und hinten
@@ -324,6 +335,7 @@ actions:
                 sequence:
                   - action: logbook.log
                     data:
+                      entity_id: input_select.schichtmodus_schlafzimmer
                       name: Schichterkennung Schlafzimmer
                       message: >-
                         Ankunft bei der Arbeit um {{ now().strftime('%H:%M') }}
@@ -341,6 +353,7 @@ actions:
             default:
               - action: logbook.log
                 data:
+                  entity_id: input_select.schichtmodus_schlafzimmer
                   name: Schichterkennung Schlafzimmer
                   message: >-
                     Ankunft bei der Arbeit um {{ now().strftime('%H:%M') }} -
@@ -381,6 +394,7 @@ actions:
               entity_id: cover.schlafzimmer
           - action: logbook.log
             data:
+              entity_id: input_select.schichtmodus_schlafzimmer
               name: Schichterkennung Schlafzimmer
               message: >-
                 Nachtmodus aktiv und Rolladen um {{ now().strftime('%H:%M') }}
@@ -406,6 +420,7 @@ actions:
               option: "{{ kern_schicht }}"
           - action: logbook.log
             data:
+              entity_id: input_select.schichtmodus_schlafzimmer
               name: Schichterkennung Schlafzimmer
               message: >-
                 Anwesenheit bei der Arbeit um {{ now().strftime('%H:%M') }}
@@ -431,6 +446,7 @@ actions:
                 sequence:
                   - action: logbook.log
                     data:
+                      entity_id: input_select.schichtmodus_schlafzimmer
                       name: Schichterkennung Schlafzimmer
                       message: >-
                         Heimkehr aus der Nachtschicht, aber die Klimaanlage
@@ -477,6 +493,7 @@ actions:
                 sequence:
                   - action: logbook.log
                     data:
+                      entity_id: input_select.schichtmodus_schlafzimmer
                       name: Schichterkennung Schlafzimmer
                       message: >-
                         Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte
@@ -488,6 +505,7 @@ actions:
                   entity_id: cover.schlafzimmer
               - action: logbook.log
                 data:
+                  entity_id: input_select.schichtmodus_schlafzimmer
                   name: Schichterkennung Schlafzimmer
                   message: >-
                     Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte

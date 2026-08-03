@@ -39,23 +39,29 @@ Automatisierung → ⋮ → In YAML bearbeiten* und den Inhalt der Datei einfüg
 ### Neue Erkennungslogik
 
 Statt starrer Fenster wird die Ankunftszeit dem **zeitlich nächsten
-Schichtbeginn** zugeordnet (Toleranz 3 h):
+Schichtbeginn** zugeordnet (Toleranz 4 h):
 
 | Ankunft bei der Arbeit | Modus |
 | --- | --- |
-| 03:00–09:00 | `frueh` (Start 06:00) |
-| 11:00–17:00 | `spaet` (Start 14:00) |
-| 19:00–01:00 | `nacht` (Start 22:00) |
-| 01:00–03:00, 09:00–11:00, 17:00–19:00 | unverändert + Logbuch-Eintrag |
+| 02:00–10:00 | `frueh` (Start 06:00) |
+| 10:00–18:00 | `spaet` (Start 14:00) |
+| 18:00–02:00 | `nacht` (Start 22:00) |
 
-Damit sind Abweichungen von einer halben oder ganzen Stunde egal, und es gibt
-keine Fenstergrenze mehr, an der die Erkennung stillschweigend ausfällt. Passen
-die Schichtzeiten nicht, reicht es, oben in der Automation die Variablen
-`schicht_starts` (Beginn je Schicht, Dezimalstunden — `5.5` = 05:30) und
-`schicht_toleranz` anzupassen.
+Damit sind Abweichungen von einer oder zwei Stunden egal, und es gibt keine
+Fenstergrenze mehr, an der die Erkennung stillschweigend ausfällt. Die Grenzen
+liegen genau in der Mitte zwischen zwei Schichtbeginnen — dort kommt niemand
+zur Arbeit.
 
-Angenommen wurde das klassische 3-Schicht-System 06:00 / 14:00 / 22:00, passend
-zur genannten Nachtschicht 22:00–06:00.
+Zugrunde liegt das klassische 3-Schicht-System 06:00 / 14:00 / 22:00.
+Praktisch beginnen die Schichten etwa eine Stunde früher; beobachtet wurde eine
+Ankunft um **19:46** bei offiziellem Beginn 22:00. Mit Toleranz 4 h bleiben
+dafür noch 1¾ Stunden Reserve bis zur Grenze um 18:00. Passen die Schichtzeiten
+grundsätzlich nicht, reicht es, oben in der Automation `schicht_starts` (Beginn
+je Schicht, Dezimalstunden — `5.5` = 05:30) und `schicht_toleranz` anzupassen.
+
+Bei gleichmäßigen 8-Stunden-Schichten und Toleranz 4 wird jede Ankunft
+zugeordnet. Wer `schicht_starts` auf ungleichmäßige Abstände ändert, kann Lücken
+erzeugen — dann bleibt der Modus unverändert und es gibt einen Logbuch-Eintrag.
 
 ### Die kritische Richtung: Rolladen öffnet nach der Nachtschicht zu früh
 
@@ -215,6 +221,20 @@ einstellbar.
 Beide Wege sind idempotent und ergänzen sich: die Ankunft erkennt sofort und
 präzise, die Anwesenheitsprüfung fängt auf, was durchgerutscht ist (und schreibt
 dann einen Logbuch-Eintrag).
+
+**Im Echtbetrieb bestätigt** (Nacht 2./3. August): die Automation wurde erst um
+22:52 aktiviert, die Ankunft bei der Arbeit war da längst vorbei. Die
+Anwesenheitsprüfung um **23:00:00** hat den Modus gesetzt, der Rolladen schloss
+um 23:43 beim Ausschalten der Klimaanlage, blieb den ganzen Vormittag zu und
+öffnete um 16:00 über das Sicherheitsnetz.
+
+### Logbuch-Einträge finden
+
+Alle `logbook.log`-Aufrufe tragen `entity_id:
+input_select.schichtmodus_schlafzimmer`. Im Protokoll (`/logbook`) lässt sich
+damit auf diese Entität filtern und man sieht alle Meldungen chronologisch
+untereinander, statt im Gesamtstrom zu scrollen. Ohne `entity_id` tauchen
+Einträge nur in der ungefilterten Ansicht auf.
 
 5. **`frueh` blieb ewig stehen.** Der Modus `frueh` wurde nirgends
    zurückgesetzt. Er hat zwar keine Rolladen-Wirkung, blieb aber bis zur
