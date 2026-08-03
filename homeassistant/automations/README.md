@@ -1,5 +1,67 @@
 # Home Assistant Automationen
 
+Vier Automationen, die sich `cover.schlafzimmer` und
+`switch.153931628878753_power` teilen:
+
+| Datei | Rolle |
+| --- | --- |
+| `rolladen_schlafzimmer_schichterkennung.yaml` | Schichterkennung, Tagschlaf, Sonnenauf-/-untergang |
+| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume |
+| `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
+| `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
+
+## klima_schlafzimmer_ein.yaml / _aus.yaml
+
+### Das Gerät konnte im Tagschlaf anlaufen
+
+Die Einschalt-Automation benutzte „Rolladen geschlossen" als Näherungswert für
+„es wird geschlafen". Der Ansatz ist richtig, die Prüfung hatte aber zwei
+Löcher — und weil die Automation nach dem Einschalten auch noch
+`set_cover_position: 78` fährt, wäre daraus Lärm **und** Licht mitten im
+Tagschlaf geworden:
+
+1. **Positions-Drift.** Der Check prüft auf State `closed`, und der gilt nur bei
+   exakt Position 0. Laut der Doku in `verschattung_nord_ost.yaml` landet der
+   Rolladen bei Drift auch mal auf 2% — dann ist sein State `open` und die
+   Sperre stand offen.
+2. **Fahrzeit.** Während der Rolladen ~30 Sekunden herunterfährt, ist sein State
+   `closing`, also ebenfalls nicht `closed`. Fällt der 10-Minuten-Trigger in
+   dieses Fenster, stand die Sperre ebenfalls offen.
+
+Ergänzt wurden deshalb zwei weitere Sperren:
+
+| Sperre | Prüfung |
+| --- | --- |
+| Schichtmodus | `input_select.schichtmodus_schlafzimmer` ≠ `nacht` — hart, unabhängig vom Rolladen |
+| Position | `current_position > 50` — fängt Drift und Fahrzeit ab; fehlt das Attribut, gilt 0 (gesperrt) |
+
+Die normale Nacht bleibt weiter über den Rolladen abgedeckt. Durchgespielt:
+Position 0/2/30/50 sperren, 78 und 100 geben frei.
+
+### Mindestlaufzeit gegen Takten
+
+Die Ausschalt-Automation prüft über den 10-Minuten-Trigger nur den
+Momentanwert (`numeric_state below 22`, ohne `for`) — ein einzelner Messwert
+unter 22°C genügte also. Zusammen mit den 20 Minuten Sperre auf der
+Einschaltseite konnte daraus ein Takten im 20-Minuten-Raster werden. Da das
+Schalten die Netzspannung kappt, greift der geräteeigene Verdichterschutz nicht.
+Ergänzt: das Gerät muss mindestens **15 Minuten** gelaufen sein.
+
+### Bekannte Kopplung
+
+Die Zielposition **78** steht an zwei Stellen: in der Variable `positionen` der
+Verschattung und als `set_cover_position` in der Einschalt-Automation.
+Automationsübergreifende Variablen gibt es in Home Assistant nicht — wird die
+Verschattungsposition des Schlafzimmers geändert, muss sie an beiden Stellen
+nachgezogen werden. In beiden Dateien vermerkt.
+
+### Doku-Abweichungen korrigiert
+
+- Einschalten: die Beschreibung nannte `cover.rolladen_schlafzimmer`, geprüft
+  wird `cover.schlafzimmer`.
+- Ausschalten: die Beschreibung nannte „höchstens 2K", das Template rechnet mit
+  `<= 3`. Der zweite Absatz derselben Beschreibung nannte bereits 3K.
+
 ## verschattung_nord_ost.yaml
 
 Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume. Hier liegt sie,

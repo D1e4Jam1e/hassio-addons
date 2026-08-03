@@ -1,0 +1,102 @@
+alias: Klimagerät anschalten
+description: >
+  Ergänzt um einen periodischen Backup-Trigger (alle 10 Min.), weil der
+  ursprüngliche "temperature.crossed_threshold"-Trigger nur bei einer echten
+  Kreuzung von unter- nach oberhalb 23°C feuert. Blieb die Temperatur einfach
+  dauerhaft über der Schwelle (z.B. weil sie schon vor dem Erstellen der
+  Automation drüber lag), gab es nie ein Kreuzungs- Ereignis und die Automation
+  lief nie an. Der Backup-Trigger prüft unabhängig davon regelmäßig den
+  aktuellen Wert.
+
+  Zusätzlich: läuft nicht an, solange cover.schlafzimmer geschlossen
+  ist - das ist der beste vorhandene Näherungswert für "es wird geschlafen"
+  (kein eigener Präsenz-/Schlaf-Sensor vorhanden). Deckt sowohl die normale
+  Nacht (Rolladen zu nach Sonnenuntergang) als auch Nachtschicht-Tagschlaf ab.
+  Gerät ist laut, soll also niemanden wecken/stören.
+
+  DREI SPERREN statt einer (ergänzt):
+    Der Rolladen-Check allein hatte zwei Löcher, durch die das Gerät mitten
+    im Tagschlaf anlaufen konnte - und dann auch noch den Rolladen auf 78%
+    gefahren hätte, also Lärm UND Licht:
+      1. Er prüft auf State "closed", und der gilt nur bei exakt Position 0.
+         Bei der in "Verschattung Nord/Ost" dokumentierten Positions-Drift
+         (homee) landet der Rolladen auch mal auf 2% - dann ist sein State
+         "open" und die Sperre war offen.
+      2. Während der Rolladen ~30 Sekunden herunterfährt, ist sein State
+         "closing", also ebenfalls nicht "closed". Fällt der
+         10-Minuten-Trigger in dieses Fenster, war die Sperre offen.
+    Deshalb jetzt zusätzlich:
+      - Schichtmodus "nacht" sperrt hart (Tagschlaf, unabhängig davon, wo
+        der Rolladen gerade steht).
+      - Die Position muss wirklich offen sein (> 50%). Fehlt das Attribut,
+        wird 0 angenommen und damit gesperrt - die sichere Richtung.
+    Die normale Nacht bleibt weiterhin über den Rolladen abgedeckt: der ist
+    dann nach Sonnenuntergang zu.
+
+  ACHTUNG bei Änderungen: die Zielposition 78 steht auch in "Verschattung
+  Nord/Ost" (Variable "positionen"). Wird die Verschattungsposition des
+  Schlafzimmers geändert, muss sie hier mitgeändert werden - automationsüber-
+  greifende Variablen gibt es in Home Assistant nicht.
+triggers:
+  - trigger: temperature.crossed_threshold
+    target:
+      entity_id: sensor.klima_schlafzimmer_temperature
+    options:
+      threshold:
+        type: above
+        value:
+          active_choice: number
+          number: 23
+          unit_of_measurement: °C
+      for:
+        hours: 0
+        minutes: 5
+        seconds: 0
+  - trigger: time_pattern
+    minutes: /10
+    id: periodic_check
+conditions:
+  - condition: numeric_state
+    entity_id: sensor.klima_schlafzimmer_temperature
+    above: 24
+  # Sperre 1: Tagschlaf nach der Nachtschicht - hart, unabhängig vom Rolladen.
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: input_select.schichtmodus_schlafzimmer
+        state: nacht
+  # Sperre 2: Rolladen-State (deckt die normale Nacht ab).
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: cover.schlafzimmer
+        state:
+          - closed
+  # Sperre 3: Rolladen muss wirklich offen stehen. Fängt Positions-Drift und
+  # das Fenster ab, in dem er gerade herunterfährt ("closing"). Fehlt das
+  # Attribut, gilt 0 - also gesperrt.
+  - condition: template
+    value_template: >-
+      {{ state_attr('cover.schlafzimmer', 'current_position') | int(0) > 50 }}
+  - condition: switch.is_off
+    target:
+      entity_id: switch.153931628878753_power
+    options:
+      behavior: any
+      for:
+        hours: 0
+        minutes: 20
+        seconds: 0
+actions:
+  - action: switch.turn_on
+    metadata: {}
+    target:
+      entity_id: switch.153931628878753_power
+    data: {}
+  - action: cover.set_cover_position
+    metadata: {}
+    target:
+      entity_id: cover.schlafzimmer
+    data:
+      position: 78
+mode: single
