@@ -9,6 +9,54 @@ Vier Automationen, die sich `cover.schlafzimmer` und
 | `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume |
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
+| `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
+
+## verschattung_west.yaml
+
+### „HWR fährt zu weit zu" — die Korrektur konnte den Fall nicht sehen
+
+Die Drift-Absicherung wartet 20 Sekunden und prüft dann nach. Geprüft wurde
+aber `is_state(cover, 'closed')` — also **nur exakt 0%**. Fährt der HWR über
+sein Ziel hinaus und landet bei 25%, ist sein State `open`, und die Korrektur
+lief nie an. Genau der beobachtete Fall.
+
+Verschärft dadurch, dass der 10-Minuten-Trigger als zweites Netz ausfällt: er
+greift nur, wenn die Position noch `> 80` ist. Ein auf 25% gedrifteter Rolladen
+ist das nicht — er wird also von keiner der beiden Absicherungen mehr angefasst
+und bleibt bis zum nächsten Öffnen dort stehen.
+
+Geprüft wird jetzt die tatsächliche Position gegen die Zielposition
+(`current_position < ziel − 5`). Durchgespielt: bei Ziel 78 korrigieren 0, 15,
+25, 45 und 50; bei Ziel 50 korrigieren 0, 15 und 25.
+
+Das ist eine Reparatur der Symptombehandlung — die Ursache bleibt die
+Laufzeit-Kalibrierung in homee.
+
+### HWR konnte nie wieder geöffnet werden
+
+Der Schließen-Zweig nimmt HWR bewusst von der „überspringe geschlossene
+Rolladen"-Regel aus (`respect_closed: false`), weil 0% wegen der
+Zwangsbelüftung nie zulässig ist. Der **Öffnen**-Zweig hatte diese Ausnahme
+nicht — er übersprang jeden Rolladen mit State `closed`, also auch den HWR.
+
+War der HWR einmal auf 0% gelandet, konnte ihn diese Automation damit nie wieder
+öffnen: der Öffnen-Zweig überspringt ihn, und der Schließen-Zweig läuft nur bei
+Hitze und Sonne. Bei einem Rolladen, für den 0% laut eigener Beschreibung nie
+zulässig ist, ist das der unangenehmere der beiden Fehler. HWR ist jetzt auch im
+Öffnen-Zweig ausgenommen.
+
+### Zielposition HWR 78%
+
+Wie gewünscht weiter offen (Wunsch: 75–80%). Wert steht in der Variable
+`positionen` zusammen mit der Küche (50%); die Toleranzprüfung „steht schon nah
+genug" bedient sich aus derselben Stelle, damit die beiden nicht wieder
+auseinanderlaufen.
+
+### `mode: queued` statt `restart`
+
+Wie bei Nord/Ost: bei `restart` bricht jeder Trigger die 20-Sekunden-Korrektur
+ab. Hier wiegt das schwerer, weil zwei Rolladen nacheinander abgearbeitet werden
+— ein Durchlauf dauert über 40 Sekunden.
 
 ## klima_schlafzimmer_ein.yaml / _aus.yaml
 
