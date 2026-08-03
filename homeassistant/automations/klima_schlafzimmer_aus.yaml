@@ -1,0 +1,65 @@
+alias: Klimagerät ausschalten
+description: >
+  Gegenstück zu "Klimagerät anschalten". Schaltet switch.153931628878753_power
+  aus, wenn:
+    - sensor.klima_schlafzimmer_temperature dauerhaft (5 Min.) unter 22°C ist,
+    UND
+    - das Büro (sensor.klima_buro_temperature, unklimatisiert, als Abgleich
+      für den Rest des Hauses) höchstens 3K wärmer ist als das Schlafzimmer.
+      Ist es mehr als 3K wärmer, läuft die Klima weiter - sonst würde sie
+      evtl. zu früh abschalten, während von außen/anderen Räumen noch viel
+      Wärme nachdrückt.
+
+  Gleiche Trigger-Logik wie beim Einschalten: "crossed_threshold" allein würde
+  verpassen, wenn die Temperatur schon dauerhaft unter 22°C war, bevor sie das
+  erste Mal geprüft wurde - deshalb zusätzlicher periodischer Backup-Trigger
+  alle 10 Minuten.
+
+  MINDESTLAUFZEIT (ergänzt): das Gerät muss mindestens 15 Minuten gelaufen
+  sein. Über den 10-Minuten-Backup-Trigger wird der Ausschalt-Zweig ohne
+  "for"-Bedingung geprüft, es genügt also ein einzelner Messwert unter 22°C.
+  Zusammen mit den 20 Minuten Sperre auf der Einschaltseite konnte daraus ein
+  Takten im 20-Minuten-Raster werden. Das Schalten kappt die Netzspannung, das
+  Gerät kann seinen eigenen Verdichterschutz also nicht anwenden.
+
+  KEINE Rolladen-/Schichtmodus-Sperre nötig: Ausschalten ist immer
+  unbedenklich - es wird davon niemand geweckt, und der Rolladen fährt danach
+  ohnehin nach (Zweig "Klima ausgeschaltet" in der Schichterkennung, sofern es
+  dunkel ist).
+triggers:
+  - trigger: temperature.crossed_threshold
+    target:
+      entity_id: sensor.klima_schlafzimmer_temperature
+    options:
+      threshold:
+        type: below
+        value:
+          active_choice: number
+          number: 22
+          unit_of_measurement: °C
+      for:
+        hours: 0
+        minutes: 5
+        seconds: 0
+  - trigger: time_pattern
+    minutes: /10
+    id: periodic_check
+conditions:
+  - condition: numeric_state
+    entity_id: sensor.klima_schlafzimmer_temperature
+    below: 22
+  - condition: template
+    value_template: |-
+      {{ (states('sensor.klima_buro_temperature') | float(0)) -
+         (states('sensor.klima_schlafzimmer_temperature') | float(0)) <= 3 }}
+  # Mindestlaufzeit gegen Takten - siehe description.
+  - condition: state
+    entity_id: switch.153931628878753_power
+    state: "on"
+    for:
+      minutes: 15
+actions:
+  - action: switch.turn_off
+    target:
+      entity_id: switch.153931628878753_power
+mode: single

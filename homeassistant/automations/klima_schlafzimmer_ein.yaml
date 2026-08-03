@@ -1,0 +1,98 @@
+alias: Klimagerät anschalten
+description: >
+  Ergänzt um einen periodischen Backup-Trigger (alle 10 Min.), weil der
+  ursprüngliche "temperature.crossed_threshold"-Trigger nur bei einer echten
+  Kreuzung von unter- nach oberhalb 23°C feuert. Blieb die Temperatur einfach
+  dauerhaft über der Schwelle (z.B. weil sie schon vor dem Erstellen der
+  Automation drüber lag), gab es nie ein Kreuzungs- Ereignis und die Automation
+  lief nie an. Der Backup-Trigger prüft unabhängig davon regelmäßig den
+  aktuellen Wert.
+
+  Zusätzlich: läuft nicht an, solange cover.schlafzimmer geschlossen
+  ist - das ist der beste vorhandene Näherungswert für "es wird geschlafen"
+  (kein eigener Präsenz-/Schlaf-Sensor vorhanden). Deckt sowohl die normale
+  Nacht (Rolladen zu nach Sonnenuntergang) als auch Nachtschicht-Tagschlaf ab.
+  Gerät ist laut, soll also niemanden wecken/stören.
+
+  ROLLADEN-CHECK ROBUSTER (ergänzt):
+    Am Kriterium ändert sich nichts - "Rolladen unten" bleibt das Signal für
+    "es wird geschlafen", und zwar bewusst: es gilt für beide Schlafenden,
+    unabhängig von Schichten. Ergänzt sind nur die zwei Zustände, in denen
+    der State "closed" noch nicht bzw. nicht mehr anliegt, obwohl der
+    Rolladen faktisch unten ist:
+      1. "closing" - während der Rolladen herunterfährt, ist sein State
+         weder "open" noch "closed". Fällt der 10-Minuten-Trigger in dieses
+         Fenster, stand die Sperre offen. Das ist keine Frage der
+         Fahrzeit-Kalibrierung, sondern ein Zustand, den es zwangsläufig
+         gibt.
+      2. Restdrift - "closed" gilt nur bei exakt Position 0. Landet der
+         Rolladen auf 2%, ist sein State "open". Alles unter 20% zählt hier
+         deshalb als unten. Praktisch steht der Rolladen ohnehin nur auf 0,
+         78 oder 100, die Grenze schneidet also nichts ab.
+    Beides sperrt nur zusätzlich, gibt nie etwas frei, was vorher gesperrt
+    war.
+
+  ACHTUNG bei Änderungen: die Zielposition 78 steht auch in "Verschattung
+  Nord/Ost" (Variable "positionen"). Wird die Verschattungsposition des
+  Schlafzimmers geändert, muss sie hier mitgeändert werden - automationsüber-
+  greifende Variablen gibt es in Home Assistant nicht.
+triggers:
+  - trigger: temperature.crossed_threshold
+    target:
+      entity_id: sensor.klima_schlafzimmer_temperature
+    options:
+      threshold:
+        type: above
+        value:
+          active_choice: number
+          number: 23
+          unit_of_measurement: °C
+      for:
+        hours: 0
+        minutes: 5
+        seconds: 0
+  - trigger: time_pattern
+    minutes: /10
+    id: periodic_check
+conditions:
+  - condition: numeric_state
+    entity_id: sensor.klima_schlafzimmer_temperature
+    above: 24
+  # Rolladen unten = es wird geschlafen. "closing" zählt mit dazu: in den
+  # Sekunden, in denen er herunterfährt, ist der State weder "open" noch
+  # "closed".
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: cover.schlafzimmer
+        state:
+          - closed
+          - closing
+  # Restdrift: "closed" gilt nur bei exakt Position 0, bei 2% wäre der State
+  # "open". Alles unter 20% zählt deshalb als unten. Fehlt das Attribut, gilt
+  # 0 - also gesperrt, die sichere Richtung.
+  - condition: template
+    value_template: >-
+      {{ state_attr('cover.schlafzimmer', 'current_position') | int(0) >= 20 }}
+  - condition: switch.is_off
+    target:
+      entity_id: switch.153931628878753_power
+    options:
+      behavior: any
+      for:
+        hours: 0
+        minutes: 20
+        seconds: 0
+actions:
+  - action: switch.turn_on
+    metadata: {}
+    target:
+      entity_id: switch.153931628878753_power
+    data: {}
+  - action: cover.set_cover_position
+    metadata: {}
+    target:
+      entity_id: cover.schlafzimmer
+    data:
+      position: 78
+mode: single

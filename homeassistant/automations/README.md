@@ -1,5 +1,239 @@
 # Home Assistant Automationen
 
+Vier Automationen, die sich `cover.schlafzimmer` und
+`switch.153931628878753_power` teilen:
+
+| Datei | Rolle |
+| --- | --- |
+| `rolladen_schlafzimmer_schichterkennung.yaml` | Schichterkennung, Tagschlaf, Sonnenauf-/-untergang |
+| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume |
+| `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
+| `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
+| `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
+
+## verschattung_west.yaml
+
+### „HWR fährt zu weit zu" — die Korrektur konnte den Fall nicht sehen
+
+Die Drift-Absicherung wartet 20 Sekunden und prüft dann nach. Geprüft wurde
+aber `is_state(cover, 'closed')` — also **nur exakt 0%**. Fährt der HWR über
+sein Ziel hinaus und landet bei 25%, ist sein State `open`, und die Korrektur
+lief nie an. Genau der beobachtete Fall.
+
+Verschärft dadurch, dass der 10-Minuten-Trigger als zweites Netz ausfällt: er
+greift nur, wenn die Position noch `> 80` ist. Ein auf 25% gedrifteter Rolladen
+ist das nicht — er wird also von keiner der beiden Absicherungen mehr angefasst
+und bleibt bis zum nächsten Öffnen dort stehen.
+
+Geprüft wird jetzt die tatsächliche Position gegen die Zielposition
+(`current_position < ziel − 5`). Durchgespielt: bei Ziel 78 korrigieren 0, 15,
+25, 45 und 50; bei Ziel 50 korrigieren 0, 15 und 25.
+
+Das ist eine Reparatur der Symptombehandlung — die Ursache liegt tiefer.
+
+### Ist die Drift überhaupt noch da?
+
+Derselbe Fehler steckte auch in `verschattung_nord_ost.yaml` (dort in fünf
+Zweigen) und ist mitkorrigiert.
+
+Beide Automationen schreiben jetzt einen Logbuch-Eintrag, wenn die Korrektur
+anläuft — mit Ziel- und Ist-Position und `entity_id` des Rolladens, also über
+die Entität filterbar:
+
+> **Verschattung West** — Positions-Drift erkannt (Ziel 78%, tatsächlich 25%) —
+> Zielposition erneut angefahren.
+
+### Die Ursache liegt in den Aktoren, nicht im Controller
+
+Die Absicherung bleibt, unabhängig vom Controller: die **EnOcean-Aktoren selbst
+arbeiten mit Laufzeiten**, sie haben keine Positionssensoren. Die gemeldete
+Position ist also immer eine Schätzung aus „wie lange bin ich gefahren", nicht
+eine Messung. Ein Wechsel des Controllers — homee, wibutler, direkter
+Bus-Abgriff — ändert daran nichts.
+
+Zwei Konsequenzen, die man beim Lesen der Logbuch-Einträge kennen muss:
+
+- **Sie zeigen nur, was der Aktor zugibt.** Meint er, er stehe auf 78%, während
+  er physisch tiefer steht, sieht Home Assistant davon nichts. Die Einträge sind
+  eine Untergrenze, kein vollständiges Bild.
+- **Der Fehler summiert sich nicht auf.** Motoren dieser Bauart erkennen die
+  Endlagen und setzen ihre Schätzung dort zurück. Weil beide Verschattungen
+  praktisch immer aus der oberen Endlage heraus verschatten (der periodische
+  Zweig verlangt sogar Position > 80), ist der beobachtete Versatz der Fehler
+  *einer einzelnen Fahrt* — also ein systematischer Kalibrierfehler, kein
+  wachsender Drift.
+
+Dass der HWR reproduzierbar zu weit fährt, passt genau dazu. Der wirksame
+Hebel ist die Laufzeit im Aktor; die Nachkorrektur hier fängt nur ab, was
+danach noch danebengeht.
+
+### Nach dem Wechsel auf wibutler prüfen
+
+Die Drift bleibt (siehe oben), aber die Anbindung wechselt — und die gesamte
+Positionslogik hängt an zwei Voraussetzungen, die integrationsabhängig sind:
+
+1. **Attribut `current_position`** muss vorhanden sein. Fehlt es, hätte die
+   Drift-Prüfung jeden Fahrbefehl als „auf 0% gedriftet" gewertet und das
+   Logbuch mit Falschmeldungen geflutet — genau die Messung, um die es hier
+   geht. Die Prüfung ist deshalb jetzt None-sicher: fehlt das Attribut, greift
+   nur noch der alte `closed`-Fall. Durchgespielt bei Ziel 78: Attribut fehlt →
+   keine Korrektur, 0 und 25 → Korrektur, 73 und 78 → keine.
+2. **`cover.set_cover_position`** muss unterstützt sein. Bietet die
+   Matter-Anbindung nur Auf/Zu/Stopp, funktioniert keine der beiden
+   Verschattungen mehr — dann bräuchte es eine andere Lösung als Zielpositionen.
+
+Beides steht in *Entwicklerwerkzeuge → Zustände* beim jeweiligen `cover`:
+`current_position` in den Attributen, `supported_features` mit gesetztem
+Positions-Bit (4).
+
+Ebenfalls prüfen: ob die Entity-IDs den Integrationswechsel überlebt haben. Alle
+fünf Automationen sprechen `cover.schlafzimmer`, `cover.kuche`, `cover.hwr`,
+`cover.badezimmer`, `cover.wc`, `cover.wohnzimmer` und `cover.terrasse` direkt
+an — legt die neue Anbindung sie als `..._2` an, laufen die Automationen ins
+Leere, ohne einen Fehler zu werfen.
+
+### HWR konnte nie wieder geöffnet werden
+
+Der Schließen-Zweig nimmt HWR bewusst von der „überspringe geschlossene
+Rolladen"-Regel aus (`respect_closed: false`), weil 0% wegen der
+Zwangsbelüftung nie zulässig ist. Der **Öffnen**-Zweig hatte diese Ausnahme
+nicht — er übersprang jeden Rolladen mit State `closed`, also auch den HWR.
+
+War der HWR einmal auf 0% gelandet, konnte ihn diese Automation damit nie wieder
+öffnen: der Öffnen-Zweig überspringt ihn, und der Schließen-Zweig läuft nur bei
+Hitze und Sonne. Bei einem Rolladen, für den 0% laut eigener Beschreibung nie
+zulässig ist, ist das der unangenehmere der beiden Fehler. HWR ist jetzt auch im
+Öffnen-Zweig ausgenommen.
+
+### Zielposition HWR 78%
+
+Wie gewünscht weiter offen (Wunsch: 75–80%). Wert steht in der Variable
+`positionen` zusammen mit der Küche (50%); die Toleranzprüfung „steht schon nah
+genug" bedient sich aus derselben Stelle, damit die beiden nicht wieder
+auseinanderlaufen.
+
+### `mode: queued` statt `restart`
+
+Wie bei Nord/Ost: bei `restart` bricht jeder Trigger die 20-Sekunden-Korrektur
+ab. Hier wiegt das schwerer, weil zwei Rolladen nacheinander abgearbeitet werden
+— ein Durchlauf dauert über 40 Sekunden.
+
+## klima_schlafzimmer_ein.yaml / _aus.yaml
+
+### Rolladen-Check robuster, Kriterium unverändert
+
+„Rolladen unten" bleibt das Signal für „es wird geschlafen" — und das bewusst:
+es gilt für beide Schlafenden, unabhängig von Schichten. Eine Sperre über
+`schichtmodus_schlafzimmer` wurde deshalb wieder verworfen; sie hätte nur die
+Nachtschicht-Tagschläferin geschützt und den zweiten Schläfer in der normalen
+Nacht gar nicht.
+
+Ergänzt sind nur die zwei Zustände, in denen der State `closed` noch nicht bzw.
+nicht mehr anliegt, obwohl der Rolladen faktisch unten ist. Beide sperren
+zusätzlich, geben nie etwas frei:
+
+| Zustand | Prüfung |
+| --- | --- |
+| `closing` | State-Bedingung um `closing` erweitert — während der Fahrt ist der State weder `open` noch `closed`, unabhängig von der Fahrzeit-Kalibrierung |
+| Restdrift | `current_position >= 20` — bei 2% wäre der State `open`; fehlt das Attribut, gilt 0 (gesperrt) |
+
+Die Grenze bei 20% schneidet nichts ab: der Rolladen steht praktisch nur auf 0,
+78 oder 100. Durchgespielt: 0/2/19 sperren, ab 20 gibt frei.
+
+Relevant ist das vor allem, weil die Automation nach dem Einschalten auch
+`set_cover_position: 78` fährt — aus einem Fehlstart würde also Lärm **und**
+Licht.
+
+### Mindestlaufzeit gegen Takten
+
+Die Ausschalt-Automation prüft über den 10-Minuten-Trigger nur den
+Momentanwert (`numeric_state below 22`, ohne `for`) — ein einzelner Messwert
+unter 22°C genügte also. Zusammen mit den 20 Minuten Sperre auf der
+Einschaltseite konnte daraus ein Takten im 20-Minuten-Raster werden. Da das
+Schalten die Netzspannung kappt, greift der geräteeigene Verdichterschutz nicht.
+Ergänzt: das Gerät muss mindestens **15 Minuten** gelaufen sein.
+
+### Bekannte Kopplung
+
+Die Zielposition **78** steht an zwei Stellen: in der Variable `positionen` der
+Verschattung und als `set_cover_position` in der Einschalt-Automation.
+Automationsübergreifende Variablen gibt es in Home Assistant nicht — wird die
+Verschattungsposition des Schlafzimmers geändert, muss sie an beiden Stellen
+nachgezogen werden. In beiden Dateien vermerkt.
+
+### Doku-Abweichungen korrigiert
+
+- Einschalten: die Beschreibung nannte `cover.rolladen_schlafzimmer`, geprüft
+  wird `cover.schlafzimmer`.
+- Ausschalten: die Beschreibung nannte „höchstens 2K", das Template rechnet mit
+  `<= 3`. Der zweite Absatz derselben Beschreibung nannte bereits 3K.
+
+## verschattung_nord_ost.yaml
+
+Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume. Hier liegt sie,
+weil sie sich mit der Schichterkennung denselben Rolladen teilt.
+
+### Koordination mit der Schichterkennung
+
+Beide Automationen fahren `cover.schlafzimmer`. Im Protokoll sichtbar geworden
+am 3. August: um **16:00:00** öffnete das Sicherheitsnetz der Schichterkennung
+den Rolladen, um **16:00:01** zog die Verschattung ihn wieder herunter.
+
+Die Verschattung überspringt Rolladen mit State `closed` bereits in allen
+Zweigen — der Tagschlaf war also im Normalfall geschützt. Der Schutz hängt
+allerdings daran, dass der Rolladen **exakt** auf Position 0 steht. Genau das
+ist bei der in der Automation dokumentierten Positions-Drift nicht garantiert:
+landet er auf 2%, ist sein State `open` und die Verschattung hätte ihn mitten im
+Tagschlaf hochgefahren.
+
+Ergänzt wurde deshalb: `cover.schlafzimmer` wird übersprungen, solange
+`input_select.schichtmodus_schlafzimmer` auf `nacht` steht — in allen vier
+Zweigen, die diesen Rolladen anfassen.
+
+Bewusst nur `nacht`. `spaet` steht von der Abfahrt am frühen Nachmittag bis zum
+nächsten Morgen und würde die Verschattung den halben Tag aussperren, `frueh`
+sogar bis 21:30. Beide brauchen den Schutz nicht — zur Schlafenszeit ist der
+Rolladen dort ohnehin über den Sonnenuntergang geschlossen.
+
+Die Gegenseite: das 16:00-Netz und die Aufwach-Erkennung setzen den Modus jetzt
+auf `keine`, **bevor** sie den Rolladen fahren. Die Verschattung ist damit im
+selben Moment wieder zuständig und zieht ihn bei Hitze direkt auf
+Verschattungsposition, statt erst beim nächsten 10-Minuten-Zyklus. Das entsperrt
+zugleich die Klimaanlage, die bei geschlossenem Rolladen blockiert ist.
+
+### Zielpositionen an einer Stelle
+
+Die Zielposition des Schlafzimmers war auf drei Werte verteilt: gefahren wurde
+auf **78**, die „steht schon nah genug"-Prüfung verglich gegen **70**, und der
+gemeinsame „alle 5"-Zweig fuhr auf **50**.
+
+Die 70 in der Prüfung war der schädlichste der drei: bei Position 78 ergibt
+`|78 − 70| = 8 > 5`, die Zielposition galt also als zu weit weg und wurde bei
+jedem Trigger erneut angefahren — die Prüfung sollte genau das verhindern.
+
+Alle Werte stehen jetzt in einer Variable, aus der sich sowohl Fahrbefehl als
+auch Prüfung bedienen:
+
+```yaml
+positionen:
+  cover.schlafzimmer: 78
+  cover.badezimmer: 50
+  cover.wc: 50
+  cover.wohnzimmer: 50
+  cover.terrasse: 50
+```
+
+Das Schlafzimmer landet damit auch im „alle 5"-Zweig auf 78 statt auf 50.
+
+### `mode: queued` statt `restart`
+
+Die Drift-Korrektur wartet 20 Sekunden und prüft dann nach. Bei `restart` bricht
+jeder in dieser Zeit feuernde der elf Trigger den Lauf ab — also genau die
+Korrektur, die nach dem Overshoot vom 26.07. gebaut wurde. Vertretbar, weil
+Temperaturen träge sind: auf der Nordseite kommt die Sonne höchstens abends kurz
+vorbei, dicht aufeinanderfolgende Trigger sind nicht zu erwarten. `max: 5`.
+
+
 ## rolladen_schlafzimmer_schichterkennung.yaml
 
 Rolladensteuerung Schlafzimmer mit automatischer Schichterkennung über den
@@ -39,23 +273,29 @@ Automatisierung → ⋮ → In YAML bearbeiten* und den Inhalt der Datei einfüg
 ### Neue Erkennungslogik
 
 Statt starrer Fenster wird die Ankunftszeit dem **zeitlich nächsten
-Schichtbeginn** zugeordnet (Toleranz 3 h):
+Schichtbeginn** zugeordnet (Toleranz 4 h):
 
 | Ankunft bei der Arbeit | Modus |
 | --- | --- |
-| 03:00–09:00 | `frueh` (Start 06:00) |
-| 11:00–17:00 | `spaet` (Start 14:00) |
-| 19:00–01:00 | `nacht` (Start 22:00) |
-| 01:00–03:00, 09:00–11:00, 17:00–19:00 | unverändert + Logbuch-Eintrag |
+| 02:00–10:00 | `frueh` (Start 06:00) |
+| 10:00–18:00 | `spaet` (Start 14:00) |
+| 18:00–02:00 | `nacht` (Start 22:00) |
 
-Damit sind Abweichungen von einer halben oder ganzen Stunde egal, und es gibt
-keine Fenstergrenze mehr, an der die Erkennung stillschweigend ausfällt. Passen
-die Schichtzeiten nicht, reicht es, oben in der Automation die Variablen
-`schicht_starts` (Beginn je Schicht, Dezimalstunden — `5.5` = 05:30) und
-`schicht_toleranz` anzupassen.
+Damit sind Abweichungen von einer oder zwei Stunden egal, und es gibt keine
+Fenstergrenze mehr, an der die Erkennung stillschweigend ausfällt. Die Grenzen
+liegen genau in der Mitte zwischen zwei Schichtbeginnen — dort kommt niemand
+zur Arbeit.
 
-Angenommen wurde das klassische 3-Schicht-System 06:00 / 14:00 / 22:00, passend
-zur genannten Nachtschicht 22:00–06:00.
+Zugrunde liegt das klassische 3-Schicht-System 06:00 / 14:00 / 22:00.
+Praktisch beginnen die Schichten etwa eine Stunde früher; beobachtet wurde eine
+Ankunft um **19:46** bei offiziellem Beginn 22:00. Mit Toleranz 4 h bleiben
+dafür noch 1¾ Stunden Reserve bis zur Grenze um 18:00. Passen die Schichtzeiten
+grundsätzlich nicht, reicht es, oben in der Automation `schicht_starts` (Beginn
+je Schicht, Dezimalstunden — `5.5` = 05:30) und `schicht_toleranz` anzupassen.
+
+Bei gleichmäßigen 8-Stunden-Schichten und Toleranz 4 wird jede Ankunft
+zugeordnet. Wer `schicht_starts` auf ungleichmäßige Abstände ändert, kann Lücken
+erzeugen — dann bleibt der Modus unverändert und es gibt einen Logbuch-Eintrag.
 
 ### Die kritische Richtung: Rolladen öffnet nach der Nachtschicht zu früh
 
@@ -215,6 +455,20 @@ einstellbar.
 Beide Wege sind idempotent und ergänzen sich: die Ankunft erkennt sofort und
 präzise, die Anwesenheitsprüfung fängt auf, was durchgerutscht ist (und schreibt
 dann einen Logbuch-Eintrag).
+
+**Im Echtbetrieb bestätigt** (Nacht 2./3. August): die Automation wurde erst um
+22:52 aktiviert, die Ankunft bei der Arbeit war da längst vorbei. Die
+Anwesenheitsprüfung um **23:00:00** hat den Modus gesetzt, der Rolladen schloss
+um 23:43 beim Ausschalten der Klimaanlage, blieb den ganzen Vormittag zu und
+öffnete um 16:00 über das Sicherheitsnetz.
+
+### Logbuch-Einträge finden
+
+Alle `logbook.log`-Aufrufe tragen `entity_id:
+input_select.schichtmodus_schlafzimmer`. Im Protokoll (`/logbook`) lässt sich
+damit auf diese Entität filtern und man sieht alle Meldungen chronologisch
+untereinander, statt im Gesamtstrom zu scrollen. Ohne `entity_id` tauchen
+Einträge nur in der ungefilterten Ansicht auf.
 
 5. **`frueh` blieb ewig stehen.** Der Modus `frueh` wurde nirgends
    zurückgesetzt. Er hat zwar keine Rolladen-Wirkung, blieb aber bis zur

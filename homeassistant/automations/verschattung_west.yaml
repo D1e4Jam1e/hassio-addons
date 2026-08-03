@@ -1,0 +1,268 @@
+alias: Verschattung West (Küche + HWR)
+description: >
+  Sonnenschutz für Westseite (cover.kuche, cover.hwr), entkoppelt von der
+  CCA-Zeitsteuerung. Gemeinsamer Trigger auf den geglätteten
+  10-Minuten-Mittelwert der Westseiten-Helligkeit
+  (sensor.sonne_westseite_illuminance_mittelwert).
+
+  Schließen 100.000 lux, Öffnen 70.000 lux (angepasst wegen Teilverschattung
+  West-Sensor im Hochsommer).
+
+  Zielposition beim Verschatten: Küche 50%, HWR 78% - siehe Variable
+  "positionen", die einzige Stelle mit diesen Werten. HWR fährt bewusst
+  weniger weit zu (Zwangsbelüftung).
+
+  HWR-Sonderfall: kein Innentemp-Check, dafür Außentemp-Schwellwert 25°C.
+
+  Absicherung gegen Positions-Drift, Stand 26.07.2026. Ursache sind die
+  EnOcean-Aktoren selbst: sie arbeiten mit Laufzeiten und haben keine
+  Positionssensoren, die gemeldete Position ist also eine Schätzung. Ein
+  Wechsel des Controllers ändert daran nichts:
+    - Nach jedem set_cover_position wird 20 Sek. gewartet und geprüft, ob
+      der Rolladen zu weit zugefahren ist. Falls ja, wird EINMALIG
+      nachkorrigiert. Bei HWR besonders wichtig, da 0% wegen
+      Zwangsbelüftung NIE ein zulässiger Zustand ist.
+      GEÄNDERT: die Prüfung war "ist er komplett geschlossen gelandet?"
+      und griff damit nur bei exakt 0%. Ein Überfahren auf z.B. 25% - also
+      genau der beobachtete Fall "HWR fährt zu weit zu" - blieb
+      unbemerkt, weil sein State dann "open" ist. Geprüft wird jetzt die
+      tatsächliche Position gegen die Zielposition.
+    - periodic_check darf nur noch aktiv werden, wenn die aktuelle Position
+      noch deutlich offen ist (>80%). Achtung: dadurch korrigiert der
+      periodische Trigger NICHT nach - steht der Rolladen nach Drift auf
+      25%, ist er nicht >80% und wird nicht angefasst. Die
+      20-Sekunden-Prüfung oben ist also die einzige Korrektur, deshalb
+      muss sie greifen.
+
+  Proaktiver Vorhersage-Trigger: Außentemp > 25°C (5 min stabil) UND Vorhersage
+  > 30°C.
+
+  Absicherung gegen "Aufwecken" abends komplett geschlossener Küche: der
+  Schließen-Zweig überspringt Küche, wenn sie bereits state "closed" ist. HWR
+  ist davon bewusst AUSGENOMMEN.
+  GEÄNDERT: das galt bisher nur für die Schließen-Zweige. Der Öffnen-Zweig
+  übersprang JEDEN Rolladen mit State "closed", also auch HWR. War HWR
+  einmal auf 0% gelandet, konnte ihn diese Automation nie wieder öffnen -
+  bei einem Rolladen, für den 0% laut Beschreibung nie zulässig ist. HWR
+  wird jetzt auch im Öffnen-Zweig nicht übersprungen.
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.sonne_westseite_illuminance_mittelwert
+    above: 100000
+    for:
+      minutes: 5
+    id: close
+  - trigger: numeric_state
+    entity_id: sensor.sonne_westseite_illuminance_mittelwert
+    below: 70000
+    for:
+      minutes: 5
+    id: open
+  - trigger: time_pattern
+    minutes: /10
+    id: periodic_check
+  - trigger: numeric_state
+    entity_id: sensor.wkh_temperature_outside
+    above: 25
+    for:
+      minutes: 5
+    id: forecast_close_all
+conditions: []
+actions:
+  - variables:
+      # Zielpositionen beim Verschatten - EINZIGE Stelle, an der sie stehen.
+      # HWR bewusst höher: Zwangsbelüftung, er darf nicht weit zufahren.
+      positionen:
+        cover.kuche: 50
+        cover.hwr: 78
+      # Wie weit darf die tatsächliche Position unter der Zielposition liegen,
+      # bevor nachkorrigiert wird.
+      drift_toleranz: 5
+  - choose:
+      - alias: Schließen - pro Raum eigene Bedingungen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: close
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.sonne_westseite_illuminance_mittelwert
+                    above: 100000
+        sequence:
+          - repeat:
+              for_each:
+                - cover: cover.kuche
+                  temp_sensor: sensor.klima_kuche_temperature
+                  indoor_threshold: 23
+                  outdoor_threshold: 23
+                  respect_closed: true
+                - cover: cover.hwr
+                  temp_sensor: null
+                  indoor_threshold: null
+                  outdoor_threshold: 25
+                  respect_closed: false
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ (not repeat.item.respect_closed or not
+                        is_state(repeat.item.cover, 'closed'))
+                           and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - positionen[repeat.item.cover]) | abs > 5) )
+                           and ( (repeat.item.temp_sensor is not none and states(repeat.item.temp_sensor) | float(0) > repeat.item.indoor_threshold)
+                                 or (states('sensor.wkh_temperature_outside') | float(0) > repeat.item.outdoor_threshold)
+                                 or (states('sensor.wkh_temperature_outside_1h') | float(0) > repeat.item.outdoor_threshold)
+                                 or (states('sensor.vorhersage_max_temp_heute') | float(0) > 30) ) }}
+                  then:
+                    - action: cover.stop_cover
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                    - delay:
+                        seconds: 1
+                    - action: cover.set_cover_position
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                      data:
+                        position: "{{ positionen[repeat.item.cover] }}"
+                    - delay:
+                        seconds: 20
+                    # Zu weit zugefahren? Nicht nur "ganz zu" - siehe
+                    # description.
+                    - if:
+                        - condition: template
+                          value_template: >-
+                            {{ is_state(repeat.item.cover, 'closed')
+                               or (state_attr(repeat.item.cover, 'current_position') is not none
+                                      and state_attr(repeat.item.cover, 'current_position') | int(0)
+                                          < positionen[repeat.item.cover] - drift_toleranz) }}
+                      then:
+                        - action: cover.set_cover_position
+                          target:
+                            entity_id: "{{ repeat.item.cover }}"
+                          data:
+                            position: "{{ positionen[repeat.item.cover] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item.cover }}"
+                            name: Verschattung West
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item.cover] }}%, tatsächlich
+                              {{ state_attr(repeat.item.cover,'current_position') }}%)
+                              - Zielposition erneut angefahren.
+      - alias: Außentemp > 25°C UND Vorhersage > 30°C - proaktiv schließen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: forecast_close_all
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.wkh_temperature_outside
+                    above: 25
+          - condition: numeric_state
+            entity_id: sensor.vorhersage_max_temp_heute
+            above: 30
+        sequence:
+          - repeat:
+              for_each:
+                - cover: cover.kuche
+                  respect_closed: true
+                - cover: cover.hwr
+                  respect_closed: false
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ (not repeat.item.respect_closed or not
+                        is_state(repeat.item.cover, 'closed'))
+                           and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - positionen[repeat.item.cover]) | abs > 5) ) }}
+                  then:
+                    - action: cover.stop_cover
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                    - delay:
+                        seconds: 1
+                    - action: cover.set_cover_position
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                      data:
+                        position: "{{ positionen[repeat.item.cover] }}"
+                    - delay:
+                        seconds: 20
+                    - if:
+                        - condition: template
+                          value_template: >-
+                            {{ is_state(repeat.item.cover, 'closed')
+                               or (state_attr(repeat.item.cover, 'current_position') is not none
+                                      and state_attr(repeat.item.cover, 'current_position') | int(0)
+                                          < positionen[repeat.item.cover] - drift_toleranz) }}
+                      then:
+                        - action: cover.set_cover_position
+                          target:
+                            entity_id: "{{ repeat.item.cover }}"
+                          data:
+                            position: "{{ positionen[repeat.item.cover] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item.cover }}"
+                            name: Verschattung West
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item.cover] }}%, tatsächlich
+                              {{ state_attr(repeat.item.cover,'current_position') }}%)
+                              - Zielposition erneut angefahren.
+      - alias: Öffnen - beide Räume gemeinsam
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: open
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.sonne_westseite_illuminance_mittelwert
+                    below: 70000
+          - condition: numeric_state
+            entity_id: sensor.wkh_temperature_outside
+            below: 25
+          - condition: numeric_state
+            entity_id: sensor.wkh_temperature_outside_1h
+            below: 25
+        sequence:
+          - repeat:
+              for_each:
+                - cover: cover.kuche
+                  respect_closed: true
+                # HWR auch hier NICHT überspringen: 0% ist für ihn nie
+                # zulässig, ein einmal dort gelandeter Rolladen käme sonst
+                # über diesen Zweig nie wieder hoch.
+                - cover: cover.hwr
+                  respect_closed: false
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ not repeat.item.respect_closed
+                           or not is_state(repeat.item.cover, 'closed') }}
+                  then:
+                    - action: cover.open_cover
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+# queued statt restart: die Drift-Korrektur wartet 20 Sekunden und prüft dann
+# nach. Bei "restart" bricht jeder in dieser Zeit feuernde Trigger den Lauf ab -
+# also genau die Korrektur, um die es hier geht. Bei zwei Rolladen nacheinander
+# dauert ein Durchlauf über 40 Sekunden, das Zeitfenster ist entsprechend groß.
+mode: queued
+max: 5
+max_exceeded: silent
