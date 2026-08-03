@@ -194,8 +194,9 @@ actions:
               - condition: template
                 value_template: >-
                   {{ is_state('cover.schlafzimmer', 'closed')
-                     or (state_attr('cover.schlafzimmer', 'current_position') | int(0))
-                        < positionen['cover.schlafzimmer'] - drift_toleranz }}
+                     or (state_attr('cover.schlafzimmer', 'current_position') is not none
+                            and state_attr('cover.schlafzimmer', 'current_position') | int(0)
+                                < positionen['cover.schlafzimmer'] - drift_toleranz) }}
             then:
               - action: cover.set_cover_position
                 target:
@@ -280,8 +281,9 @@ actions:
               - condition: template
                 value_template: >-
                   {{ is_state('cover.badezimmer', 'closed')
-                     or (state_attr('cover.badezimmer', 'current_position') | int(0))
-                        < positionen['cover.badezimmer'] - drift_toleranz }}
+                     or (state_attr('cover.badezimmer', 'current_position') is not none
+                            and state_attr('cover.badezimmer', 'current_position') | int(0)
+                                < positionen['cover.badezimmer'] - drift_toleranz) }}
             then:
               - action: cover.set_cover_position
                 target:
@@ -362,8 +364,9 @@ actions:
               - condition: template
                 value_template: >-
                   {{ is_state('cover.wc', 'closed')
-                     or (state_attr('cover.wc', 'current_position') | int(0))
-                        < positionen['cover.wc'] - drift_toleranz }}
+                     or (state_attr('cover.wc', 'current_position') is not none
+                            and state_attr('cover.wc', 'current_position') | int(0)
+                                < positionen['cover.wc'] - drift_toleranz) }}
             then:
               - action: cover.set_cover_position
                 target:
@@ -448,8 +451,9 @@ actions:
                         - condition: template
                           value_template: >-
                             {{ is_state(repeat.item.cover, 'closed')
-                               or (state_attr(repeat.item.cover, 'current_position') | int(0))
-                                  < positionen[repeat.item.cover] - drift_toleranz }}
+                               or (state_attr(repeat.item.cover, 'current_position') is not none
+                                      and state_attr(repeat.item.cover, 'current_position') | int(0)
+                                          < positionen[repeat.item.cover] - drift_toleranz) }}
                       then:
                         - action: cover.set_cover_position
                           target:
@@ -548,8 +552,9 @@ actions:
                         - condition: template
                           value_template: >-
                             {{ is_state(repeat.item.cover, 'closed')
-                               or (state_attr(repeat.item.cover, 'current_position') | int(0))
-                                  < positionen[repeat.item.cover] - drift_toleranz }}
+                               or (state_attr(repeat.item.cover, 'current_position') is not none
+                                      and state_attr(repeat.item.cover, 'current_position') | int(0)
+                                          < positionen[repeat.item.cover] - drift_toleranz) }}
                       then:
                         - action: cover.set_cover_position
                           target:

@@ -54,6 +54,36 @@ auf (Badlicht ging abends von selbst an). Beides passt zum Muster „ein zweiter
 Controller fährt dazwischen". Ist homee als Quelle raus, könnte die Drift
 mitverschwunden sein.
 
+Dazu kommt der Wechsel auf wibutler (Matter): homee war laut der ursprünglichen
+Beschreibung **zeitbasiert** — die Position wurde aus der Fahrzeit geschätzt,
+und eine falsch kalibrierte Laufzeit erzeugt Drift zwangsläufig. Meldet die neue
+Anbindung die echte Position aus dem Antrieb, fällt die Ursache strukturell weg.
+
+### Nach dem Wechsel auf wibutler prüfen
+
+Die gesamte Positionslogik hängt an zwei Voraussetzungen, die integrations-
+abhängig sind:
+
+1. **Attribut `current_position`** muss vorhanden sein. Fehlt es, hätte die
+   Drift-Prüfung jeden Fahrbefehl als „auf 0% gedriftet" gewertet und das
+   Logbuch mit Falschmeldungen geflutet — genau die Messung, um die es hier
+   geht. Die Prüfung ist deshalb jetzt None-sicher: fehlt das Attribut, greift
+   nur noch der alte `closed`-Fall. Durchgespielt bei Ziel 78: Attribut fehlt →
+   keine Korrektur, 0 und 25 → Korrektur, 73 und 78 → keine.
+2. **`cover.set_cover_position`** muss unterstützt sein. Bietet die
+   Matter-Anbindung nur Auf/Zu/Stopp, funktioniert keine der beiden
+   Verschattungen mehr — dann bräuchte es eine andere Lösung als Zielpositionen.
+
+Beides steht in *Entwicklerwerkzeuge → Zustände* beim jeweiligen `cover`:
+`current_position` in den Attributen, `supported_features` mit gesetztem
+Positions-Bit (4).
+
+Ebenfalls prüfen: ob die Entity-IDs den Integrationswechsel überlebt haben. Alle
+fünf Automationen sprechen `cover.schlafzimmer`, `cover.kuche`, `cover.hwr`,
+`cover.badezimmer`, `cover.wc`, `cover.wohnzimmer` und `cover.terrasse` direkt
+an — legt die neue Anbindung sie als `..._2` an, laufen die Automationen ins
+Leere, ohne einen Fehler zu werfen.
+
 ### HWR konnte nie wieder geöffnet werden
 
 Der Schließen-Zweig nimmt HWR bewusst von der „überspringe geschlossene
