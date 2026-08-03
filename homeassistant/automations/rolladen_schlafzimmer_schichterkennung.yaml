@@ -1,0 +1,692 @@
+alias: Rolladen Schlafzimmer (Schichterkennung über Standort)
+description: >
+  Automatische Schichterkennung ohne manuelle Eingaben, für cover.schlafzimmer.
+  Ersetzt Nachtschicht-Logik aus Homee (dort: Ankunft zuhause zwischen
+  05:00-07:00), jetzt zuverlässiger über das Betreten von zone.arbeit.
+
+  SCHICHTERKENNUNG (beim BETRETEN von zone.arbeit):
+    Der Zeitpunkt der ANKUNFT bei der Arbeit wird dem nächstgelegenen
+    offiziellen Schichtbeginn zugeordnet (3-Schicht-System):
+      frueh -> 06:00 | spaet -> 14:00 | nacht -> 22:00
+    Es zählt der zeitlich nächste Start, mit einer Toleranz von 3 Stunden.
+    Dadurch spielt es keine Rolle, ob sie eine halbe Stunde früher oder
+    später ankommt - es gibt keine starren Fenstergrenzen mehr, mitten in
+    denen die Erkennung ausfällt. Ankunft zwischen:
+      03:00-09:00 -> frueh | 11:00-17:00 -> spaet | 19:00-01:00 -> nacht
+    Liegt die Ankunft weiter als 3 h neben jedem Schichtbeginn
+    (01:00-03:00, 09:00-11:00, 17:00-19:00), bleibt der Modus unverändert
+    und es wird ein Logbuch-Eintrag geschrieben - besser kein Modus als
+    der falsche.
+    Schichtzeiten ändern sich? Nur die Variablen "schicht_starts" und
+    "schicht_toleranz" anpassen, alles andere ergibt sich daraus.
+
+  ANWESENHEITSPRÜFUNG (Absicherung, alle 30 Minuten):
+    Das Betreten der Zone ist ein einmaliges Ereignis - geht es verloren
+    (GPS ungenau, Handy offline, HA gerade neu gestartet), wäre der Modus
+    für den ganzen Tag verloren. Deshalb wird zusätzlich alle 30 Minuten
+    geprüft, ob sie sich gerade IM Kern einer Schicht bei der Arbeit
+    befindet:
+      07:00-13:00 -> frueh | 15:00-21:00 -> spaet | 23:00-05:00 -> nacht
+    (jeweils Schichtbeginn + 1 h bis + 7 h, siehe "kern_von"/"kern_bis")
+    Diese Prüfung greift nur, wenn der Modus noch "keine" ist - eine
+    bereits erkannte Schicht wird nie überschrieben. Damit setzt z.B.
+    eine Überstunde nach der Frühschicht nicht versehentlich "spaet".
+    Geprüft werden dabei ALLE Tracker der Person (iPhone, Tesla), nicht
+    nur der zusammengefasste Person-State: meldet einer davon die
+    Arbeitszone, zählt das als anwesend. Der Person-State schaltet auf
+    den zuletzt aktualisierten Tracker um und kann deshalb auf not_home
+    springen, obwohl ein anderer Tracker noch korrekt "Arbeit" meldet.
+
+    Umgekehrt gilt: solange der Nachtmodus läuft (Tagschlaf), wird eine
+    gemeldete "Ankunft bei der Arbeit" ignoriert. Sie ist dann fast
+    sicher ein GPS-Sprung - z.B. wenn das iPhone beim Verlassen des
+    Gebäudes wieder Signal bekommt und die Arbeitszone nachmeldet.
+
+  WICHTIG zur Erkennung: der State von person.nancy_hiller ist beim Betreten
+  einer Zone NICHT die Entity-ID der Zone ("arbeit"), sondern der ANZEIGENAME
+  der Zone (z.B. "Arbeit"). Deshalb wird hier auf den Zone-Trigger plus einen
+  case-insensitiven Vergleich gegen den Anzeigenamen von zone.arbeit geprüft.
+
+  NACHTSCHICHT (kritischster Teil - der Rolladen darf nach der
+  Nachtschicht auf keinen Fall zu früh öffnen; zu spät öffnen ist
+  dagegen harmlos, deshalb sind alle Regeln hier in diese Richtung
+  ausgelegt):
+    Ankunft zuhause (person.nancy_hiller -> home) während Modus "nacht"
+      -> Rolladen SOFORT zu (Tagschlaf).
+    NETZ 2: das Heimkehr-Ereignis kann komplett ausbleiben - z.B. wenn
+      das Auto zuhause steht, während sie mit dem iPhone bei der Arbeit
+      ist. Dann steht die Person schon auf "home" und wechselt bei ihrer
+      echten Ankunft gar nicht mehr. Deshalb wird im Heimkehr-Fenster
+      alle 30 Minuten geprüft: Nachtmodus aktiv und Rolladen nicht
+      geschlossen -> zufahren. Normalerweise ist der Rolladen zu diesem
+      Zeitpunkt ohnehin schon zu (Sonnenuntergang); dieser Fall greift
+      vor allem, wenn abends die Klimaanlage lief und das Schließen
+      ausgesetzt wurde.
+    LETZTES NETZ: Heimkehr zwischen 04:00 und 09:00 schliesst den
+      Rolladen auch dann, wenn die Schichterkennung komplett versagt hat,
+      und setzt den Modus auf "nacht" nach (entspricht der alten
+      Homee-Logik). Damit greifen auch Aufwach-Erkennung und das
+      16:00-Netz. Ein zu Unrecht gesetzter Nachtmodus kostet nichts - er
+      wird spätestens um 16:00 wieder zurückgesetzt.
+    Anhaltende Bewegung im WiFa-Flur (binary_sensor.bewegung_wifa_occupancy,
+      10 Min. durchgehend) während Modus "nacht" -> Rolladen hoch, Modus
+      zurück auf "keine".
+      ABER erst, wenn sie mindestens 3 h zuhause ist
+      ("aufwach_mindestschlaf") UND es nach 09:00 ist
+      ("aufwach_fruehestens"). Der Melder im WiFa-Flur ist bewusst
+      gewählt - unten, ein Toilettengang kommt da nicht vorbei. Kritisch
+      ist nur die erste Stunde nach der Heimkehr: Aufräumen und
+      Fertigmachen führen durch den Flur und hätten den Rolladen wieder
+      geöffnet, kaum dass er zu war. Bei Heimkehr 06:30 ist die
+      Aufwach-Erkennung damit ab 09:30 scharf.
+    SICHERHEITSNETZ: falls bis 16:00 Uhr noch kein Aufwachen erkannt
+      wurde, öffnet der Rolladen trotzdem automatisch und der Modus wird
+      zurückgesetzt.
+
+  SPÄTSCHICHT:
+    Morgens öffnet der Rolladen erst ab 10:00 Uhr (statt der normalen
+    Grenze) - "soll ja nicht den ganzen Tag schlafen". Sonnenaufgang
+    zählt weiterhin, falls der später als 10:00 liegt. Modus wird nach
+    dem Öffnen zurückgesetzt.
+
+  NORMAL (kein Schichtmodus aktiv):
+    Öffnungsgrenze ist 07:00 an Werktagen, aber 09:00 am Wochenende
+    (Sa/So) ODER wenn Urlaubsmodus aktiv ist (input_boolean.
+    urlaubsmodus_schlafzimmer) - damit es am Wochenende/im Urlaub nicht
+    schon um 7 Uhr hell wird. Sonnenaufgang zählt weiterhin, falls der
+    später als die jeweilige Grenze liegt.
+
+  FRÜHSCHICHT:
+    Aktuell nur zur Erkennung/für spätere Zwecke, keine eigene
+    Rolladen-Wirkung - läuft normal nach der oben beschriebenen
+    07:00/09:00-Grenze. Der Modus wird erst abends um 21:30 zurückgesetzt
+    (nicht schon morgens): so bleibt er während der ganzen Schicht inkl.
+    Überstunden stehen und blockiert die Anwesenheitsprüfung, die sonst
+    bei Überstunden ab 15:00 fälschlich "spaet" setzen würde.
+
+  KLIMAANLAGE (switch.153931628878753_power):
+    Es ist ein mobiles Gerät, dessen Abluftschlauch im Fenster liegt - der
+    Rolladen kann physisch nicht schließen, solange es läuft. Deshalb
+    setzt JEDER schließende Zweig aus, wenn die Anlage an ist:
+    Sonnenuntergang, Heimkehr aus der Nachtschicht, das letzte Netz und
+    das Zwangs-Schließen im Heimkehr-Fenster. Sobald die Anlage
+    ausgeschaltet wird und es dunkel ist, holt der Klima-Zweig das
+    Schließen nach - auch nach Mitternacht (dafür wird "after: sunset"
+    ODER "before: sunrise" geprüft; "after: sunset" allein ist nach
+    Mitternacht falsch).
+    Der Schichtmodus wird davon nie blockiert: er wird auch dann gesetzt,
+    wenn der Rolladen gerade nicht zufahren kann. Jeder ausgesetzte
+    Schließvorgang landet im Logbuch - läuft die Anlage also durch,
+    während sie schlafen will, steht dort warum es hell bleibt.
+
+  Abends (Sonnenuntergang) schließt der Rolladen normal, unabhängig vom
+  Schichtmodus - mit der oben beschriebenen Klimaanlagen-Ausnahme.
+
+  Voraussetzung:
+    - Helfer input_select.schichtmodus_schlafzimmer anlegen, Optionen:
+      keine, frueh, spaet, nacht (Startwert: keine)
+    - Helfer input_boolean.urlaubsmodus_schlafzimmer anlegen - manuell
+      vor/nach dem Urlaub an-/ausschalten
+    - zone.arbeit muss existieren; person.nancy_hiller muss einen
+      GPS-fähigen device_tracker haben (App/Companion), damit die Zone
+      überhaupt erkannt wird
+triggers:
+  # Primär: echter Zone-Trigger (funktioniert unabhängig vom Anzeigenamen der
+  # Zone, setzt aber GPS-Koordinaten am Tracker voraus).
+  - trigger: zone
+    entity_id: person.nancy_hiller
+    zone: zone.arbeit
+    event: enter
+    id: zone_arbeit_enter
+  # Fallback: State-Wechsel der Person auf einen Zonennamen. "not_from" filtert
+  # unknown/unavailable heraus, damit ein Neustart von Home Assistant keine
+  # Schicht fälschlich erkennt.
+  - trigger: state
+    entity_id: person.nancy_hiller
+    not_to:
+      - home
+      - not_home
+      - unknown
+      - unavailable
+    not_from:
+      - unknown
+      - unavailable
+    id: person_zonenwechsel
+  # Absicherung: regelmäßig prüfen, ob sie mitten in einer Schicht bei der
+  # Arbeit ist - falls das einmalige Betreten-Ereignis verloren ging.
+  - trigger: time_pattern
+    minutes: "/30"
+    id: anwesenheit_check
+  - trigger: state
+    entity_id: person.nancy_hiller
+    to: home
+    id: arrived_home
+  - trigger: state
+    entity_id: binary_sensor.bewegung_wifa_occupancy
+    to: "on"
+    for:
+      minutes: 10
+    id: wake_motion
+  - trigger: time
+    at: "16:00:00"
+    id: safety_net_open
+  - trigger: sun
+    event: sunrise
+    id: sunrise
+  - trigger: time
+    at: "07:00:00"
+    id: floor_up_normal
+  - trigger: time
+    at: "09:00:00"
+    id: floor_up_weekend
+  - trigger: time
+    at: "10:00:00"
+    id: floor_up_spaet
+  # Frühschicht-Modus abräumen: nach dem Ende der Spätschicht-Kernzeit (21:00)
+  # und vor der Nachtschicht-Kernzeit (23:00) bzw. der Anfahrt zur Nachtschicht.
+  - trigger: time
+    at: "21:30:00"
+    id: reset_frueh
+  - trigger: sun
+    event: sunset
+    id: sunset
+  - trigger: state
+    entity_id: switch.153931628878753_power
+    to: "off"
+    id: klima_aus
+conditions: []
+actions:
+  - variables:
+      sleep_in: >
+        {{ now().isoweekday() in [6, 7] or
+        is_state('input_boolean.urlaubsmodus_schlafzimmer', 'on') }}
+      normal_boundary: "{{ '09:00' if sleep_in else '07:00' }}"
+      # ---- Schichtzeiten: HIER anpassen, wenn sich die Schichten ändern ----
+      # Offizieller Beginn jeder Schicht als Stunde (Dezimal, z.B. 5.5 = 05:30).
+      schicht_starts:
+        frueh: 6
+        spaet: 14
+        nacht: 22
+      # Wie weit darf die Ankunft vom Schichtbeginn abweichen (in Stunden),
+      # damit sie noch dieser Schicht zugeordnet wird.
+      schicht_toleranz: 3
+      # Kernzeit für die Anwesenheitsprüfung: ab wie vielen Stunden nach
+      # Schichtbeginn bis wie viele Stunden danach gilt "sie ist mitten in
+      # dieser Schicht". Bei 8-Stunden-Schichten lässt 1..7 vorne und hinten
+      # je eine Stunde Puffer für Anfahrt und Überstunden.
+      kern_von: 1
+      kern_bis: 7
+      # --- Absicherung für die kritische Richtung ---
+      # Kritisch ist NUR: der Rolladen öffnet nach der Nachtschicht zu früh.
+      # Zu spät öffnen oder ein überflüssig gesetzter Nachtmodus kosten
+      # nichts - deshalb sind die beiden folgenden Regeln bewusst
+      # großzügig ausgelegt.
+      #
+      # Kommt sie in diesem Fenster nach Hause, wird Tagschlaf angenommen,
+      # auch wenn die Schichterkennung vorher versagt hat (entspricht der
+      # alten Homee-Logik). Fenster = Nachtschicht-Ende +/- 2 h.
+      # Bis 09:00 statt 08:00: deckt auch Überstunden und eine verzögert
+      # gemeldete Heimkehr ab (Tracker springt erst spät auf "home").
+      heimkehr_nacht_von: "04:00"
+      heimkehr_nacht_bis: "09:00"
+      # Bewegung zählt erst als Aufwachen, wenn BEIDE Sperren erfüllt sind.
+      # Der WiFa-Flur liegt unten - ein Toilettengang kommt da nicht vorbei,
+      # deshalb ist der Melder als Aufwach-Signal gut gewählt. Das Problem
+      # ist nur die erste Stunde: nach der Heimkehr um ~06:30 wird noch
+      # aufgeräumt und sich fertig gemacht, und genau dieser Weg führt durch
+      # den Flur. Deshalb primär eine Sperre relativ zur Heimkehr statt
+      # einer starren Uhrzeit - so wird ein frühes Aufstehen nicht unnötig
+      # bis 16:00 blockiert.
+      #
+      # Mindestens so viele Stunden muss sie zuhause gewesen sein
+      # (gemessen am letzten State-Wechsel von person.nancy_hiller).
+      aufwach_mindestschlaf: 3
+      # Zusätzliche Plausibilitätsgrenze: vor dieser Uhrzeit nie aufwecken,
+      # falls sie mal deutlich früher heimkommt.
+      aufwach_fruehestens: "09:00"
+      # ----------------------------------------------------------------------
+      # Alle Schreibweisen, unter denen "zone.arbeit" im State der Person
+      # auftauchen kann: der Anzeigename der Zone und die Entity-ID.
+      arbeit_namen: >
+        {{ [ state_attr('zone.arbeit', 'friendly_name') | default('Arbeit', true),
+             'arbeit' ] | map('lower') | list }}
+      war_bei_arbeit: >
+        {{ trigger.from_state is defined and trigger.from_state is not none
+           and trigger.from_state.state | lower in arbeit_namen }}
+      ist_bei_arbeit: >
+        {{ trigger.to_state is defined and trigger.to_state is not none
+           and trigger.to_state.state | lower in arbeit_namen }}
+      # True nur beim tatsächlichen Betreten (Zone-Trigger oder Wechsel von
+      # "woanders" nach "Arbeit") - nicht bei reinen Attribut-Updates.
+      arbeit_betreten: >
+        {{ trigger.id == 'zone_arbeit_enter'
+           or (ist_bei_arbeit and not war_bei_arbeit) }}
+      # Ankunftszeit dem zeitlich nächsten Schichtbeginn zuordnen. Der Abstand
+      # wird über Mitternacht hinweg gerechnet (-12 h .. +12 h), damit z.B.
+      # 23:30 korrekt zur Nachtschicht (22:00) und nicht zur Frühschicht zählt.
+      erkannte_schicht: >
+        {% set t = now().hour + now().minute / 60 %}
+        {% set ns = namespace(name='keine', dist=99) %}
+        {% for name, start in schicht_starts.items() %}
+          {% set abstand = ((((t - start + 12) % 24) - 12) | abs) %}
+          {% if abstand < ns.dist %}
+            {% set ns.dist = abstand %}
+            {% set ns.name = name %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.name if ns.dist <= schicht_toleranz else 'keine' }}
+      # Ist sie JETZT bei der Arbeit? (Momentaufnahme, unabhängig vom Trigger)
+      # Bewusst NICHT nur der Person-State: die Person wird aus mehreren
+      # Trackern gebildet (iPhone, Tesla) und schaltet auf den zuletzt
+      # aktualisierten um. Das iPhone hat im Gebäude kein Signal, das Auto
+      # ist nicht immer dabei - der Person-State kann dadurch auf not_home
+      # springen, obwohl ein Tracker noch korrekt "Arbeit" meldet. Deshalb
+      # zählt hier: meldet IRGENDEIN Tracker der Person die Arbeitszone?
+      aktuell_bei_arbeit: >
+        {% set tracker = state_attr('person.nancy_hiller', 'device_trackers')
+                         or [] %}
+        {% set zustaende = (expand(tracker) | map(attribute='state') | list)
+                           + [ states('person.nancy_hiller') ] %}
+        {{ zustaende | map('lower') | select('in', arbeit_namen)
+           | list | count > 0 }}
+      # In wessen Kernzeit fällt der aktuelle Zeitpunkt? "keine", wenn wir
+      # gerade im Übergang zwischen zwei Schichten sind.
+      kern_schicht: >
+        {% set t = now().hour + now().minute / 60 %}
+        {% set ns = namespace(name='keine') %}
+        {% for name, start in schicht_starts.items() %}
+          {% set seit_start = (t - start) % 24 %}
+          {% if kern_von <= seit_start <= kern_bis %}
+            {% set ns.name = name %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.name }}
+  - choose:
+      - alias: Schichterkennung - Ankunft bei der Arbeit auswerten
+        conditions:
+          - condition: template
+            value_template: "{{ arbeit_betreten }}"
+        sequence:
+          - choose:
+              # Läuft gerade der Tagschlaf, wird der Modus NIE überschrieben.
+              # Eine "Ankunft bei der Arbeit" ist dann fast sicher ein
+              # GPS-Sprung (iPhone bekommt beim Verlassen des Gebäudes wieder
+              # Signal und meldet die Arbeitszone nach). Ohne diese Sperre
+              # würde z.B. eine Meldung um 07:00 den Modus auf "frueh" setzen
+              # und der Rolladen mitten im Schlaf hochfahren.
+              # Echte Schichtwechsel sind davon nicht betroffen: "nacht" wird
+              # spätestens um 16:00 zurückgesetzt, lange vor der nächsten
+              # Anfahrt.
+              - conditions:
+                  - condition: state
+                    entity_id: input_select.schichtmodus_schlafzimmer
+                    state: nacht
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Schichterkennung Schlafzimmer
+                      message: >-
+                        Ankunft bei der Arbeit um {{ now().strftime('%H:%M') }}
+                        gemeldet, aber der Nachtmodus läuft noch (Tagschlaf) -
+                        ignoriert, Modus bleibt "nacht".
+              - conditions:
+                  - condition: template
+                    value_template: "{{ erkannte_schicht != 'keine' }}"
+                sequence:
+                  - action: input_select.select_option
+                    target:
+                      entity_id: input_select.schichtmodus_schlafzimmer
+                    data:
+                      option: "{{ erkannte_schicht }}"
+            default:
+              - action: logbook.log
+                data:
+                  name: Schichterkennung Schlafzimmer
+                  message: >-
+                    Ankunft bei der Arbeit um {{ now().strftime('%H:%M') }} -
+                    keinem Schichtbeginn innerhalb von {{ schicht_toleranz }} h
+                    zuzuordnen. Modus bleibt auf
+                    "{{ states('input_select.schichtmodus_schlafzimmer') }}".
+      - alias: >-
+          Nachtschicht - Rolladen im Heimkehr-Fenster zwangsweise zu (falls
+          das Heimkehr-Ereignis nie kam)
+        conditions:
+          - condition: trigger
+            id: anwesenheit_check
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+          - condition: template
+            value_template: >-
+              {{ heimkehr_nacht_von <= now().strftime('%H:%M')
+                 < heimkehr_nacht_bis }}
+          # "nicht geschlossen" statt "offen": bei unknown/unavailable wird
+          # ebenfalls geschlossen - die sichere Richtung.
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.schlafzimmer
+                state: closed
+          # Gleiche Ausnahme wie beim Schließen zum Sonnenuntergang: läuft
+          # die Klimaanlage, wird nicht zugefahren. Sobald sie ausgeht,
+          # schließt der Klima-Zweig nach.
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: switch.153931628878753_power
+                state: "on"
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: logbook.log
+            data:
+              name: Schichterkennung Schlafzimmer
+              message: >-
+                Nachtmodus aktiv und Rolladen um {{ now().strftime('%H:%M') }}
+                noch offen - zwangsweise geschlossen.
+      - alias: >-
+          Schichterkennung - Anwesenheit während der Schicht (Absicherung,
+          falls die Ankunft nicht erkannt wurde)
+        conditions:
+          - condition: trigger
+            id: anwesenheit_check
+          # Eine bereits erkannte Schicht wird nie überschrieben.
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: keine
+          - condition: template
+            value_template: >-
+              {{ aktuell_bei_arbeit and kern_schicht != 'keine' }}
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: "{{ kern_schicht }}"
+          - action: logbook.log
+            data:
+              name: Schichterkennung Schlafzimmer
+              message: >-
+                Anwesenheit bei der Arbeit um {{ now().strftime('%H:%M') }}
+                erkannt - Modus nachträglich auf "{{ kern_schicht }}" gesetzt
+                (Ankunft wurde nicht erkannt).
+      - alias: Nachtschicht - Ankunft zuhause, Rolladen sofort zu
+        conditions:
+          - condition: trigger
+            id: arrived_home
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+        sequence:
+          # Läuft die Klimaanlage, liegt ihr Abluftschlauch im Fenster - der
+          # Rolladen kann dann physisch nicht schließen. Statt zuzufahren
+          # wird das protokolliert; der Klima-Zweig holt das Schließen nach,
+          # sobald die Anlage ausgeschaltet wird.
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: switch.153931628878753_power
+                    state: "on"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Schichterkennung Schlafzimmer
+                      message: >-
+                        Heimkehr aus der Nachtschicht, aber die Klimaanlage
+                        läuft (Abluftschlauch im Fenster) - Rolladen bleibt
+                        offen. Er schließt automatisch, sobald die Anlage
+                        ausgeschaltet wird.
+            default:
+              - action: cover.close_cover
+                target:
+                  entity_id: cover.schlafzimmer
+      - alias: >-
+          Nachtschicht - LETZTES NETZ: Heimkehr 04:00-09:00, auch ohne
+          erkannte Schicht Rolladen zu
+        conditions:
+          - condition: trigger
+            id: arrived_home
+          # Greift für jeden Modus ausser "nacht" - der ist oben schon
+          # abgehandelt.
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: nacht
+          - condition: template
+            value_template: >-
+              {{ heimkehr_nacht_von <= now().strftime('%H:%M')
+                 < heimkehr_nacht_bis }}
+        sequence:
+          # Modus zuerst und immer setzen - unabhängig davon, ob der Rolladen
+          # gerade schließen kann. Daran hängen Aufwach-Erkennung und das
+          # 16:00-Netz.
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: nacht
+          - choose:
+              # Klimaanlage läuft -> Abluftschlauch im Fenster, es kann nicht
+              # geschlossen werden. Der Klima-Zweig holt es nach.
+              - conditions:
+                  - condition: state
+                    entity_id: switch.153931628878753_power
+                    state: "on"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: Schichterkennung Schlafzimmer
+                      message: >-
+                        Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte
+                        Nachtschicht - Modus auf "nacht" gesetzt. Rolladen
+                        bleibt vorerst offen, weil die Klimaanlage läuft.
+            default:
+              - action: cover.close_cover
+                target:
+                  entity_id: cover.schlafzimmer
+              - action: logbook.log
+                data:
+                  name: Schichterkennung Schlafzimmer
+                  message: >-
+                    Heimkehr um {{ now().strftime('%H:%M') }} ohne erkannte
+                    Nachtschicht - Tagschlaf angenommen, Rolladen zu und Modus
+                    auf "nacht" gesetzt.
+      - alias: Nachtschicht - Aufwachen erkannt (Bewegung), Rolladen hoch
+        conditions:
+          - condition: trigger
+            id: wake_motion
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+          # Sperre 1: sie muss schon eine Weile zuhause sein. Sonst gilt
+          # das Aufräumen/Fertigmachen direkt nach der Heimkehr als
+          # Aufwachen und der Rolladen fährt wieder hoch, kaum dass er zu
+          # ist. Fehlt die Entity, ist das Ergebnis False -> es bleibt beim
+          # Sicherheitsnetz um 16:00.
+          - condition: template
+            value_template: >-
+              {% set p = states.person.nancy_hiller %}
+              {{ p is not none and (now() - p.last_changed).total_seconds()
+                 >= aufwach_mindestschlaf * 3600 }}
+          # Sperre 2: Plausibilitätsgrenze nach Uhrzeit.
+          - condition: template
+            value_template: >-
+              {{ now().strftime('%H:%M') >= aufwach_fruehestens }}
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: >-
+          Nachtschicht - Sicherheitsnetz 16:00 (falls keine Bewegung erkannt
+          wurde)
+        conditions:
+          - condition: trigger
+            id: safety_net_open
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: nacht
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: >-
+          Hochfahren - Sonnenaufgang (normal ab 07:00/09:00, Spätschicht ab
+          10:00)
+        conditions:
+          - condition: trigger
+            id: sunrise
+          - condition: template
+            value_template: >-
+              {% set m = states('input_select.schichtmodus_schlafzimmer') %}
+              {{ m != 'nacht' and now().strftime('%H:%M') >=
+                 ('10:00' if m == 'spaet' else normal_boundary) }}
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          # Nur "spaet" zurücksetzen - "frueh" muss über den Tag stehen
+          # bleiben, siehe Trigger "reset_frueh" um 21:30.
+          - if:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: spaet
+            then:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.schichtmodus_schlafzimmer
+                data:
+                  option: keine
+      - alias: >-
+          Hochfahren - Boden-Zeit 07:00 (Werktag, weder Nacht- noch Spätschicht,
+          kein Urlaub)
+        conditions:
+          - condition: trigger
+            id: floor_up_normal
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: nacht
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: spaet
+          - condition: template
+            value_template: "{{ not sleep_in }}"
+          - condition: sun
+            after: sunrise
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: >-
+          Hochfahren - Boden-Zeit 09:00 (Wochenende oder Urlaub, weder Nacht-
+          noch Spätschicht)
+        conditions:
+          - condition: trigger
+            id: floor_up_weekend
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: nacht
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: input_select.schichtmodus_schlafzimmer
+                state: spaet
+          - condition: template
+            value_template: "{{ sleep_in }}"
+          - condition: sun
+            after: sunrise
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: >-
+          Hochfahren - Boden-Zeit 10:00 (Spätschicht, falls Sonnenaufgang früher
+          war)
+        conditions:
+          - condition: trigger
+            id: floor_up_spaet
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: spaet
+          - condition: sun
+            after: sunrise
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: Frühschicht-Modus abends zurücksetzen (21:30)
+        conditions:
+          - condition: trigger
+            id: reset_frueh
+          - condition: state
+            entity_id: input_select.schichtmodus_schlafzimmer
+            state: frueh
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: input_select.schichtmodus_schlafzimmer
+            data:
+              option: keine
+      - alias: Runterfahren - Sonnenuntergang (nicht wenn Klima läuft)
+        conditions:
+          - condition: trigger
+            id: sunset
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: switch.153931628878753_power
+                state: "on"
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: >-
+          Klima ausgeschaltet - Rolladen nachträglich schließen (falls
+          Sonnenuntergang schon vorbei)
+        conditions:
+          - condition: trigger
+            id: klima_aus
+          # "after: sunset" allein ist nur zwischen Sonnenuntergang und
+          # Mitternacht wahr - nach Mitternacht bezieht sich die Bedingung
+          # schon auf den Sonnenuntergang des NEUEN Tages und ist falsch.
+          # Wird die Klimaanlage also um 01:00 ausgeschaltet, bliebe der
+          # Rolladen bis zum Morgen offen. Deshalb beide Hälften der Nacht
+          # abfragen.
+          - condition: or
+            conditions:
+              - condition: sun
+                after: sunset
+              - condition: sun
+                before: sunrise
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.schlafzimmer
+# queued statt restart: die Automation hat viele unabhängige Trigger. Bei
+# "restart" bricht ein neuer Trigger (z.B. Sonnenuntergang) einen gerade
+# laufenden Ablauf (z.B. Schichterkennung) mittendrin ab.
+mode: queued
+max: 10
+max_exceeded: silent
