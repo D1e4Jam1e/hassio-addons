@@ -11,12 +11,14 @@ description: >
   Kein Helligkeits-, Außentemp- oder Vorhersage-Faktor wie bei Süd/West - nur
   der jeweilige Innentemp-Sensor als alleiniger Trigger, mit 2°C Hysterese
   zwischen Schließen und Öffnen, um Flackern zu vermeiden:
-    Schließen (50% zu): Innentemp > 23°C, 5 Min. stabil
+    Schließen: Innentemp > 23°C, 5 Min. stabil
     Öffnen: Innentemp < 21°C, 5 Min. stabil
+  Zielposition beim Verschatten: Schlafzimmer 78%, alle anderen 50% -
+  siehe Variable "positionen", die einzige Stelle mit diesen Werten.
 
   ZUSÄTZLICH (für alle 5 Räume gemeinsam):
     Außentemp > 25°C (5 Min. stabil) UND Vorhersage-Max-Temp heute > 25°C
-      -> alle 5 schließen (50%), unabhängig vom jeweiligen Innentemp-Wert.
+      -> alle 5 auf ihre Zielposition, unabhängig vom Innentemp-Wert.
     Außentemp < 25°C -> alle 5 wieder öffnen, ABER nur die, die gerade
       NICHT komplett geschlossen (0%, state "closed") sind.
 
@@ -126,12 +128,17 @@ triggers:
 conditions: []
 actions:
   - variables:
-      # Zielposition des Schlafzimmer-Rolladens beim Verschatten. An EINER
-      # Stelle definiert, damit Fahrbefehl und "steht schon nah genug"-Prüfung
-      # nicht wieder auseinanderlaufen (die Prüfung stand auf 70, gefahren
-      # wurde aber auf 78 - dadurch galt die Zielposition selbst als zu weit
-      # weg und wurde bei jedem Trigger erneut angefahren).
-      pos_schlafzimmer: 78
+      # Zielpositionen beim Verschatten - EINZIGE Stelle, an der sie stehen.
+      # Vorher waren sie über die Zweige verteilt: das Schlafzimmer wurde auf
+      # 78 gefahren, die "steht schon nah genug"-Prüfung verglich aber noch
+      # gegen 70, und der gemeinsame "alle 5"-Zweig fuhr es auf 50. Fahrbefehl
+      # und Prüfung holen den Wert jetzt beide von hier.
+      positionen:
+        cover.schlafzimmer: 78
+        cover.badezimmer: 50
+        cover.wc: 50
+        cover.wohnzimmer: 50
+        cover.terrasse: 50
       # Solange dieser Modus aktiv ist, wird cover.schlafzimmer nicht
       # angefasst - Tagschlaf nach der Nachtschicht.
       schlafzimmer_gesperrt: >
@@ -163,7 +170,7 @@ actions:
               {{ (trigger.id == 'periodic_check' and
               (state_attr('cover.schlafzimmer','current_position') | int(0)) >
               80)
-                 or (trigger.id != 'periodic_check' and (state_attr('cover.schlafzimmer','current_position') | int(0) - pos_schlafzimmer) | abs > 5) }}
+                 or (trigger.id != 'periodic_check' and (state_attr('cover.schlafzimmer','current_position') | int(0) - positionen['cover.schlafzimmer']) | abs > 5) }}
         sequence:
           - action: cover.stop_cover
             target:
@@ -174,7 +181,7 @@ actions:
             target:
               entity_id: cover.schlafzimmer
             data:
-              position: "{{ pos_schlafzimmer }}"
+              position: "{{ positionen['cover.schlafzimmer'] }}"
           - delay:
               seconds: 20
           - if:
@@ -186,7 +193,7 @@ actions:
                 target:
                   entity_id: cover.schlafzimmer
                 data:
-                  position: "{{ pos_schlafzimmer }}"
+                  position: "{{ positionen['cover.schlafzimmer'] }}"
       - alias: Schlafzimmer - Öffnen
         conditions:
           - condition: or
@@ -235,7 +242,7 @@ actions:
             value_template: >
               {{ (trigger.id == 'periodic_check' and
               (state_attr('cover.badezimmer','current_position') | int(0)) > 80)
-                 or (trigger.id != 'periodic_check' and (state_attr('cover.badezimmer','current_position') | int(0) - 50) | abs > 5) }}
+                 or (trigger.id != 'periodic_check' and (state_attr('cover.badezimmer','current_position') | int(0) - positionen['cover.badezimmer']) | abs > 5) }}
         sequence:
           - action: cover.stop_cover
             target:
@@ -246,7 +253,7 @@ actions:
             target:
               entity_id: cover.badezimmer
             data:
-              position: 50
+              position: "{{ positionen['cover.badezimmer'] }}"
           - delay:
               seconds: 20
           - if:
@@ -258,7 +265,7 @@ actions:
                 target:
                   entity_id: cover.badezimmer
                 data:
-                  position: 50
+                  position: "{{ positionen['cover.badezimmer'] }}"
       - alias: Bad - Öffnen
         conditions:
           - condition: or
@@ -303,7 +310,7 @@ actions:
             value_template: >
               {{ (trigger.id == 'periodic_check' and
               (state_attr('cover.wc','current_position') | int(0)) > 80)
-                 or (trigger.id != 'periodic_check' and (state_attr('cover.wc','current_position') | int(0) - 50) | abs > 5) }}
+                 or (trigger.id != 'periodic_check' and (state_attr('cover.wc','current_position') | int(0) - positionen['cover.wc']) | abs > 5) }}
         sequence:
           - action: cover.stop_cover
             target:
@@ -314,7 +321,7 @@ actions:
             target:
               entity_id: cover.wc
             data:
-              position: 50
+              position: "{{ positionen['cover.wc'] }}"
           - delay:
               seconds: 20
           - if:
@@ -326,7 +333,7 @@ actions:
                 target:
                   entity_id: cover.wc
                 data:
-                  position: 50
+                  position: "{{ positionen['cover.wc'] }}"
       - alias: WC - Öffnen
         conditions:
           - condition: or
@@ -378,7 +385,7 @@ actions:
                         'off'))
                            and not is_state(repeat.item.cover, 'closed')
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
-                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - 50) | abs > 5) ) }}
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - positionen[repeat.item.cover]) | abs > 5) ) }}
                   then:
                     - action: cover.stop_cover
                       target:
@@ -389,7 +396,7 @@ actions:
                       target:
                         entity_id: "{{ repeat.item.cover }}"
                       data:
-                        position: 50
+                        position: "{{ positionen[repeat.item.cover] }}"
                     - delay:
                         seconds: 20
                     - if:
@@ -400,7 +407,7 @@ actions:
                           target:
                             entity_id: "{{ repeat.item.cover }}"
                           data:
-                            position: 50
+                            position: "{{ positionen[repeat.item.cover] }}"
       - alias: Wohnzimmer + Terrasse - Öffnen (nach Küchentemperatur)
         conditions:
           - condition: or
@@ -466,7 +473,7 @@ actions:
                            and not is_state(repeat.item.cover, 'closed')
                            and not (repeat.item.cover == 'cover.schlafzimmer' and schlafzimmer_gesperrt)
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
-                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - 50) | abs > 5) ) }}
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - positionen[repeat.item.cover]) | abs > 5) ) }}
                   then:
                     - action: cover.stop_cover
                       target:
@@ -477,7 +484,7 @@ actions:
                       target:
                         entity_id: "{{ repeat.item.cover }}"
                       data:
-                        position: 50
+                        position: "{{ positionen[repeat.item.cover] }}"
                     - delay:
                         seconds: 20
                     - if:
@@ -488,7 +495,7 @@ actions:
                           target:
                             entity_id: "{{ repeat.item.cover }}"
                           data:
-                            position: 50
+                            position: "{{ positionen[repeat.item.cover] }}"
       - alias: Außentemp unter 25°C - öffnen (nur wenn nicht komplett geschlossen)
         conditions:
           - condition: or
@@ -521,5 +528,12 @@ actions:
                     - action: cover.open_cover
                       target:
                         entity_id: "{{ repeat.item }}"
-mode: restart
+# queued statt restart: die Drift-Korrektur wartet 20 Sekunden und prüft dann
+# nach. Bei "restart" bricht jeder in dieser Zeit feuernde der elf Trigger den
+# Lauf ab - also genau die Korrektur, die gegen den Overshoot vom 26.07. gebaut
+# wurde. Vertretbar, weil Temperaturen träge sind: auf der Nordseite kommt die
+# Sonne höchstens abends kurz vorbei, dicht aufeinanderfolgende Trigger sind
+# also nicht zu erwarten.
+mode: queued
+max: 5
 max_exceeded: silent

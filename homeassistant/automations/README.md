@@ -33,26 +33,37 @@ selben Moment wieder zuständig und zieht ihn bei Hitze direkt auf
 Verschattungsposition, statt erst beim nächsten 10-Minuten-Zyklus. Das entsperrt
 zugleich die Klimaanlage, die bei geschlossenem Rolladen blockiert ist.
 
-### Nebenbei behoben
+### Zielpositionen an einer Stelle
 
-Der Schlafzimmer-Zweig fuhr auf Position **78**, prüfte aber gegen **70**
-(`(current_position - 70) | abs > 5`). Damit galt die Zielposition selbst als
-mehr als 5 Punkte daneben — der Rolladen wurde bei jedem Trigger erneut auf 78
-gefahren, obwohl er schon dort stand. Die Prüfung sollte genau das verhindern.
-Position und Prüfung teilen sich jetzt die Variable `pos_schlafzimmer`.
+Die Zielposition des Schlafzimmers war auf drei Werte verteilt: gefahren wurde
+auf **78**, die „steht schon nah genug"-Prüfung verglich gegen **70**, und der
+gemeinsame „alle 5"-Zweig fuhr auf **50**.
 
-### Offen (nicht geändert)
+Die 70 in der Prüfung war der schädlichste der drei: bei Position 78 ergibt
+`|78 − 70| = 8 > 5`, die Zielposition galt also als zu weit weg und wurde bei
+jedem Trigger erneut angefahren — die Prüfung sollte genau das verhindern.
 
-- **`mode: restart`**: die Drift-Korrektur wartet 20 Sekunden und prüft dann
-  nach. Feuert in dieser Zeit irgendein anderer der elf Trigger, bricht der Lauf
-  ab und die Korrektur entfällt — also genau der Mechanismus, der gegen die
-  Overshoot-Vorfälle gebaut wurde. `mode: queued` mit `max: 5` würde das
-  beheben, ändert aber das Verhalten bei dicht aufeinanderfolgenden
-  Temperaturwechseln (bisher gewinnt der neueste Trigger, dann liefe jeder
-  Trigger nacheinander ab).
-- **Zielposition 78 vs. 50**: der eigene Schlafzimmer-Zweig fährt auf 78, der
-  gemeinsame „alle 5"-Zweig auf 50. Je nachdem, welcher Zweig auslöst, landet
-  derselbe Rolladen also auf unterschiedlichen Positionen.
+Alle Werte stehen jetzt in einer Variable, aus der sich sowohl Fahrbefehl als
+auch Prüfung bedienen:
+
+```yaml
+positionen:
+  cover.schlafzimmer: 78
+  cover.badezimmer: 50
+  cover.wc: 50
+  cover.wohnzimmer: 50
+  cover.terrasse: 50
+```
+
+Das Schlafzimmer landet damit auch im „alle 5"-Zweig auf 78 statt auf 50.
+
+### `mode: queued` statt `restart`
+
+Die Drift-Korrektur wartet 20 Sekunden und prüft dann nach. Bei `restart` bricht
+jeder in dieser Zeit feuernde der elf Trigger den Lauf ab — also genau die
+Korrektur, die nach dem Overshoot vom 26.07. gebaut wurde. Vertretbar, weil
+Temperaturen träge sind: auf der Nordseite kommt die Sonne höchstens abends kurz
+vorbei, dicht aufeinanderfolgende Trigger sind nicht zu erwarten. `max: 5`.
 
 
 ## rolladen_schlafzimmer_schichterkennung.yaml
