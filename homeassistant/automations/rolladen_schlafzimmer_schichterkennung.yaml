@@ -533,14 +533,20 @@ actions:
             value_template: >-
               {{ now().strftime('%H:%M') >= aufwach_fruehestens }}
         sequence:
-          - action: cover.open_cover
-            target:
-              entity_id: cover.schlafzimmer
+          # Modus ZUERST zurücksetzen, dann fahren: die Automation
+          # "Verschattung Nord/Ost" lässt cover.schlafzimmer in Ruhe, solange
+          # der Modus auf "nacht" steht. Erst zurücksetzen heißt, sie ist im
+          # selben Moment wieder zuständig und zieht den Rolladen bei Hitze
+          # direkt auf Verschattungsposition - statt ihn erst beim nächsten
+          # 10-Minuten-Zyklus zu korrigieren.
           - action: input_select.select_option
             target:
               entity_id: input_select.schichtmodus_schlafzimmer
             data:
               option: keine
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
       - alias: >-
           Nachtschicht - Sicherheitsnetz 16:00 (falls keine Bewegung erkannt
           wurde)
@@ -551,14 +557,15 @@ actions:
             entity_id: input_select.schichtmodus_schlafzimmer
             state: nacht
         sequence:
-          - action: cover.open_cover
-            target:
-              entity_id: cover.schlafzimmer
+          # Erst Modus, dann fahren - siehe Aufwach-Zweig oben.
           - action: input_select.select_option
             target:
               entity_id: input_select.schichtmodus_schlafzimmer
             data:
               option: keine
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
       - alias: >-
           Hochfahren - Sonnenaufgang (normal ab 07:00/09:00, Spätschicht ab
           10:00)

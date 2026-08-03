@@ -1,0 +1,525 @@
+alias: Verschattung Nord/Ost (rein temperaturbasiert)
+description: >
+  Sonnenschutz für die Räume ohne Helligkeitssensor (Nord-/Ostseite, keine
+  direkte Wärmestrahlung, daher reicht Temperatur allein):
+    cover.schlafzimmer  <- sensor.klima_schlafzimmer_temperature
+    cover.badezimmer           <- sensor.klima_bad_temperature
+    cover.wc            <- sensor.klima_wc_temperature
+    cover.wohnzimmer    <- sensor.klima_kuche_temperature (Küche)
+    cover.terrasse      <- sensor.klima_kuche_temperature (Küche)
+
+  Kein Helligkeits-, Außentemp- oder Vorhersage-Faktor wie bei Süd/West - nur
+  der jeweilige Innentemp-Sensor als alleiniger Trigger, mit 2°C Hysterese
+  zwischen Schließen und Öffnen, um Flackern zu vermeiden:
+    Schließen (50% zu): Innentemp > 23°C, 5 Min. stabil
+    Öffnen: Innentemp < 21°C, 5 Min. stabil
+
+  ZUSÄTZLICH (für alle 5 Räume gemeinsam):
+    Außentemp > 25°C (5 Min. stabil) UND Vorhersage-Max-Temp heute > 25°C
+      -> alle 5 schließen (50%), unabhängig vom jeweiligen Innentemp-Wert.
+    Außentemp < 25°C -> alle 5 wieder öffnen, ABER nur die, die gerade
+      NICHT komplett geschlossen (0%, state "closed") sind.
+
+  Absicherung gegen Positions-Drift (homee, zeitbasiert), Stand 26.07.2026, nach
+  wiederholten Overshoot-Vorfällen (Schlafzimmer schoss trotz Ziel 50% mehrfach
+  bis auf 0% durch):
+    - Nach jedem set_cover_position wird 20 Sek. gewartet und geprüft, ob
+      der Rolladen trotzdem komplett geschlossen gelandet ist. Falls ja,
+      wird EINMALIG nachkorrigiert (erneut auf Zielposition gesetzt),
+      statt auf den nächsten 10-Minuten-Zyklus zu warten.
+    - periodic_check (Backup-Trigger, alle 10 Min.) darf nur noch aktiv
+      werden, wenn die aktuelle Position noch deutlich offen ist (>80%) -
+      verhindert, dass der Backup-Trigger denselben driftgefährdeten
+      Fahrbefehl alle 10 Minuten erneut auslöst und die Overshoot-Gefahr
+      dadurch vervielfacht (das war vermutlich der Hauptverstärker des
+      Vorfalls vom 26.07.).
+
+  Absicherung gegen "Aufwecken" nachts komplett geschlossener Rolladen: auch die
+  Schließen- UND Öffnen-Zweige überspringen Rolladen, die bereits state "closed"
+  (Position 0) sind - das greift weiterhin für echte nächtliche Vollschließung
+  (Schichterkennung), da diese Automation dort nicht eingreift.
+
+  SCHICHTMODUS HAT VORRANG (ergänzt):
+    Der "closed"-Check oben schützt den Tagschlaf nach der Nachtschicht nur,
+    solange der Rolladen exakt auf Position 0 steht. Genau das ist bei der
+    dokumentierten Positions-Drift aber nicht garantiert - landet er auf 2%,
+    ist sein State "open" und diese Automation würde ihn mitten im Tagschlaf
+    wieder hochfahren. Deshalb wird cover.schlafzimmer zusätzlich immer dann
+    übersprungen, wenn input_select.schichtmodus_schlafzimmer auf "nacht"
+    steht. Betrifft alle vier Zweige, die diesen Rolladen anfassen.
+
+    Bewusst NUR "nacht": "spaet" steht von der Abfahrt am frühen Nachmittag
+    bis zum nächsten Morgen und würde die Verschattung im halben Tag
+    aussperren, "frueh" sogar bis 21:30. Beide Fälle brauchen den Schutz
+    nicht - da ist der Rolladen zur Schlafenszeit ohnehin über den
+    Sonnenuntergang geschlossen.
+
+    Das Sicherheitsnetz um 16:00 in der Schichterkennung setzt den Modus auf
+    "keine", bevor es den Rolladen öffnet. Diese Automation ist damit im
+    selben Moment wieder zuständig und zieht ihn auf Verschattungsposition -
+    was auch die Klimaanlage entsperrt, die bei geschlossenem Rolladen
+    blockiert ist.
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.klima_schlafzimmer_temperature
+    above: 23
+    for:
+      minutes: 5
+    id: schlafzimmer_close
+  - trigger: numeric_state
+    entity_id: sensor.klima_schlafzimmer_temperature
+    below: 21
+    for:
+      minutes: 5
+    id: schlafzimmer_open
+  - trigger: numeric_state
+    entity_id: sensor.klima_bad_temperature
+    above: 23
+    for:
+      minutes: 5
+    id: bad_close
+  - trigger: numeric_state
+    entity_id: sensor.klima_bad_temperature
+    below: 21
+    for:
+      minutes: 5
+    id: bad_open
+  - trigger: numeric_state
+    entity_id: sensor.klima_wc_temperature
+    above: 23
+    for:
+      minutes: 5
+    id: wc_close
+  - trigger: numeric_state
+    entity_id: sensor.klima_wc_temperature
+    below: 21
+    for:
+      minutes: 5
+    id: wc_open
+  - trigger: numeric_state
+    entity_id: sensor.klima_kuche_temperature
+    above: 23
+    for:
+      minutes: 5
+    id: wz_terrasse_close
+  - trigger: numeric_state
+    entity_id: sensor.klima_kuche_temperature
+    below: 21
+    for:
+      minutes: 5
+    id: wz_terrasse_open
+  - trigger: numeric_state
+    entity_id: sensor.wkh_temperature_outside
+    above: 25
+    for:
+      minutes: 5
+    id: forecast_close_all
+  - trigger: numeric_state
+    entity_id: sensor.wkh_temperature_outside
+    below: 25
+    for:
+      minutes: 5
+    id: outdoor_open_all
+  - trigger: time_pattern
+    minutes: /10
+    id: periodic_check
+conditions: []
+actions:
+  - variables:
+      # Zielposition des Schlafzimmer-Rolladens beim Verschatten. An EINER
+      # Stelle definiert, damit Fahrbefehl und "steht schon nah genug"-Prüfung
+      # nicht wieder auseinanderlaufen (die Prüfung stand auf 70, gefahren
+      # wurde aber auf 78 - dadurch galt die Zielposition selbst als zu weit
+      # weg und wurde bei jedem Trigger erneut angefahren).
+      pos_schlafzimmer: 78
+      # Solange dieser Modus aktiv ist, wird cover.schlafzimmer nicht
+      # angefasst - Tagschlaf nach der Nachtschicht.
+      schlafzimmer_gesperrt: >
+        {{ is_state('input_select.schichtmodus_schlafzimmer', 'nacht') }}
+  - choose:
+      - alias: Schlafzimmer - Schließen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: schlafzimmer_close
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_schlafzimmer_temperature
+                    above: 23
+          # Schichtmodus hat Vorrang - siehe description.
+          - condition: template
+            value_template: "{{ not schlafzimmer_gesperrt }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.schlafzimmer
+                state: closed
+          - condition: template
+            value_template: >
+              {{ (trigger.id == 'periodic_check' and
+              (state_attr('cover.schlafzimmer','current_position') | int(0)) >
+              80)
+                 or (trigger.id != 'periodic_check' and (state_attr('cover.schlafzimmer','current_position') | int(0) - pos_schlafzimmer) | abs > 5) }}
+        sequence:
+          - action: cover.stop_cover
+            target:
+              entity_id: cover.schlafzimmer
+          - delay:
+              seconds: 1
+          - action: cover.set_cover_position
+            target:
+              entity_id: cover.schlafzimmer
+            data:
+              position: "{{ pos_schlafzimmer }}"
+          - delay:
+              seconds: 20
+          - if:
+              - condition: state
+                entity_id: cover.schlafzimmer
+                state: closed
+            then:
+              - action: cover.set_cover_position
+                target:
+                  entity_id: cover.schlafzimmer
+                data:
+                  position: "{{ pos_schlafzimmer }}"
+      - alias: Schlafzimmer - Öffnen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: schlafzimmer_open
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_schlafzimmer_temperature
+                    below: 21
+          # Schichtmodus hat Vorrang - der wichtigste der vier Zweige: hier
+          # würde der Rolladen mitten im Tagschlaf hochfahren.
+          - condition: template
+            value_template: "{{ not schlafzimmer_gesperrt }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.schlafzimmer
+                state: closed
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.schlafzimmer
+      - alias: Bad - Schließen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: bad_close
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_bad_temperature
+                    above: 23
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.badezimmer
+                state: closed
+          - condition: template
+            value_template: >
+              {{ (trigger.id == 'periodic_check' and
+              (state_attr('cover.badezimmer','current_position') | int(0)) > 80)
+                 or (trigger.id != 'periodic_check' and (state_attr('cover.badezimmer','current_position') | int(0) - 50) | abs > 5) }}
+        sequence:
+          - action: cover.stop_cover
+            target:
+              entity_id: cover.badezimmer
+          - delay:
+              seconds: 1
+          - action: cover.set_cover_position
+            target:
+              entity_id: cover.badezimmer
+            data:
+              position: 50
+          - delay:
+              seconds: 20
+          - if:
+              - condition: state
+                entity_id: cover.badezimmer
+                state: closed
+            then:
+              - action: cover.set_cover_position
+                target:
+                  entity_id: cover.badezimmer
+                data:
+                  position: 50
+      - alias: Bad - Öffnen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: bad_open
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_bad_temperature
+                    below: 21
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.badezimmer
+                state: closed
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.badezimmer
+      - alias: WC - Schließen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: wc_close
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_wc_temperature
+                    above: 23
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.wc
+                state: closed
+          - condition: template
+            value_template: >
+              {{ (trigger.id == 'periodic_check' and
+              (state_attr('cover.wc','current_position') | int(0)) > 80)
+                 or (trigger.id != 'periodic_check' and (state_attr('cover.wc','current_position') | int(0) - 50) | abs > 5) }}
+        sequence:
+          - action: cover.stop_cover
+            target:
+              entity_id: cover.wc
+          - delay:
+              seconds: 1
+          - action: cover.set_cover_position
+            target:
+              entity_id: cover.wc
+            data:
+              position: 50
+          - delay:
+              seconds: 20
+          - if:
+              - condition: state
+                entity_id: cover.wc
+                state: closed
+            then:
+              - action: cover.set_cover_position
+                target:
+                  entity_id: cover.wc
+                data:
+                  position: 50
+      - alias: WC - Öffnen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: wc_open
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_wc_temperature
+                    below: 21
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.wc
+                state: closed
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: cover.wc
+      - alias: Wohnzimmer + Terrasse - Schließen (nach Küchentemperatur)
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: wz_terrasse_close
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_kuche_temperature
+                    above: 23
+        sequence:
+          - repeat:
+              for_each:
+                - cover: cover.wohnzimmer
+                  check_door: false
+                - cover: cover.terrasse
+                  check_door: true
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >
+                        {{ (not repeat.item.check_door or
+                        is_state('binary_sensor.terrassenturkontakt_contact',
+                        'off'))
+                           and not is_state(repeat.item.cover, 'closed')
+                           and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - 50) | abs > 5) ) }}
+                  then:
+                    - action: cover.stop_cover
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                    - delay:
+                        seconds: 1
+                    - action: cover.set_cover_position
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                      data:
+                        position: 50
+                    - delay:
+                        seconds: 20
+                    - if:
+                        - condition: template
+                          value_template: "{{ is_state(repeat.item.cover, 'closed') }}"
+                      then:
+                        - action: cover.set_cover_position
+                          target:
+                            entity_id: "{{ repeat.item.cover }}"
+                          data:
+                            position: 50
+      - alias: Wohnzimmer + Terrasse - Öffnen (nach Küchentemperatur)
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: wz_terrasse_open
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.klima_kuche_temperature
+                    below: 21
+        sequence:
+          - repeat:
+              for_each:
+                - cover.wohnzimmer
+                - cover.terrasse
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: "{{ not is_state(repeat.item, 'closed') }}"
+                  then:
+                    - action: cover.open_cover
+                      target:
+                        entity_id: "{{ repeat.item }}"
+      - alias: Außentemp > 25°C UND Vorhersage > 25°C - alle 5 proaktiv schließen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: forecast_close_all
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.wkh_temperature_outside
+                    above: 25
+          - condition: numeric_state
+            entity_id: sensor.vorhersage_max_temp_heute
+            above: 25
+        sequence:
+          - repeat:
+              for_each:
+                - cover: cover.schlafzimmer
+                  check_door: false
+                - cover: cover.badezimmer
+                  check_door: false
+                - cover: cover.wc
+                  check_door: false
+                - cover: cover.wohnzimmer
+                  check_door: false
+                - cover: cover.terrasse
+                  check_door: true
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >
+                        {{ (not repeat.item.check_door or
+                        is_state('binary_sensor.terrassenturkontakt_contact',
+                        'off'))
+                           and not is_state(repeat.item.cover, 'closed')
+                           and not (repeat.item.cover == 'cover.schlafzimmer' and schlafzimmer_gesperrt)
+                           and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - 50) | abs > 5) ) }}
+                  then:
+                    - action: cover.stop_cover
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                    - delay:
+                        seconds: 1
+                    - action: cover.set_cover_position
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
+                      data:
+                        position: 50
+                    - delay:
+                        seconds: 20
+                    - if:
+                        - condition: template
+                          value_template: "{{ is_state(repeat.item.cover, 'closed') }}"
+                      then:
+                        - action: cover.set_cover_position
+                          target:
+                            entity_id: "{{ repeat.item.cover }}"
+                          data:
+                            position: 50
+      - alias: Außentemp unter 25°C - öffnen (nur wenn nicht komplett geschlossen)
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: outdoor_open_all
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.wkh_temperature_outside
+                    below: 25
+        sequence:
+          - repeat:
+              for_each:
+                - cover.schlafzimmer
+                - cover.badezimmer
+                - cover.wc
+                - cover.wohnzimmer
+                - cover.terrasse
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ not is_state(repeat.item, 'closed')
+                           and not (repeat.item == 'cover.schlafzimmer'
+                                    and schlafzimmer_gesperrt) }}
+                  then:
+                    - action: cover.open_cover
+                      target:
+                        entity_id: "{{ repeat.item }}"
+mode: restart
+max_exceeded: silent

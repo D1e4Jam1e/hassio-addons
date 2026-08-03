@@ -1,5 +1,60 @@
 # Home Assistant Automationen
 
+## verschattung_nord_ost.yaml
+
+Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume. Hier liegt sie,
+weil sie sich mit der Schichterkennung denselben Rolladen teilt.
+
+### Koordination mit der Schichterkennung
+
+Beide Automationen fahren `cover.schlafzimmer`. Im Protokoll sichtbar geworden
+am 3. August: um **16:00:00** öffnete das Sicherheitsnetz der Schichterkennung
+den Rolladen, um **16:00:01** zog die Verschattung ihn wieder herunter.
+
+Die Verschattung überspringt Rolladen mit State `closed` bereits in allen
+Zweigen — der Tagschlaf war also im Normalfall geschützt. Der Schutz hängt
+allerdings daran, dass der Rolladen **exakt** auf Position 0 steht. Genau das
+ist bei der in der Automation dokumentierten Positions-Drift nicht garantiert:
+landet er auf 2%, ist sein State `open` und die Verschattung hätte ihn mitten im
+Tagschlaf hochgefahren.
+
+Ergänzt wurde deshalb: `cover.schlafzimmer` wird übersprungen, solange
+`input_select.schichtmodus_schlafzimmer` auf `nacht` steht — in allen vier
+Zweigen, die diesen Rolladen anfassen.
+
+Bewusst nur `nacht`. `spaet` steht von der Abfahrt am frühen Nachmittag bis zum
+nächsten Morgen und würde die Verschattung den halben Tag aussperren, `frueh`
+sogar bis 21:30. Beide brauchen den Schutz nicht — zur Schlafenszeit ist der
+Rolladen dort ohnehin über den Sonnenuntergang geschlossen.
+
+Die Gegenseite: das 16:00-Netz und die Aufwach-Erkennung setzen den Modus jetzt
+auf `keine`, **bevor** sie den Rolladen fahren. Die Verschattung ist damit im
+selben Moment wieder zuständig und zieht ihn bei Hitze direkt auf
+Verschattungsposition, statt erst beim nächsten 10-Minuten-Zyklus. Das entsperrt
+zugleich die Klimaanlage, die bei geschlossenem Rolladen blockiert ist.
+
+### Nebenbei behoben
+
+Der Schlafzimmer-Zweig fuhr auf Position **78**, prüfte aber gegen **70**
+(`(current_position - 70) | abs > 5`). Damit galt die Zielposition selbst als
+mehr als 5 Punkte daneben — der Rolladen wurde bei jedem Trigger erneut auf 78
+gefahren, obwohl er schon dort stand. Die Prüfung sollte genau das verhindern.
+Position und Prüfung teilen sich jetzt die Variable `pos_schlafzimmer`.
+
+### Offen (nicht geändert)
+
+- **`mode: restart`**: die Drift-Korrektur wartet 20 Sekunden und prüft dann
+  nach. Feuert in dieser Zeit irgendein anderer der elf Trigger, bricht der Lauf
+  ab und die Korrektur entfällt — also genau der Mechanismus, der gegen die
+  Overshoot-Vorfälle gebaut wurde. `mode: queued` mit `max: 5` würde das
+  beheben, ändert aber das Verhalten bei dicht aufeinanderfolgenden
+  Temperaturwechseln (bisher gewinnt der neueste Trigger, dann liefe jeder
+  Trigger nacheinander ab).
+- **Zielposition 78 vs. 50**: der eigene Schlafzimmer-Zweig fährt auf 78, der
+  gemeinsame „alle 5"-Zweig auf 50. Je nachdem, welcher Zweig auslöst, landet
+  derselbe Rolladen also auf unterschiedlichen Positionen.
+
+
 ## rolladen_schlafzimmer_schichterkennung.yaml
 
 Rolladensteuerung Schlafzimmer mit automatischer Schichterkennung über den
