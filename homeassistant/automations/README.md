@@ -29,8 +29,30 @@ Geprüft wird jetzt die tatsächliche Position gegen die Zielposition
 (`current_position < ziel − 5`). Durchgespielt: bei Ziel 78 korrigieren 0, 15,
 25, 45 und 50; bei Ziel 50 korrigieren 0, 15 und 25.
 
-Das ist eine Reparatur der Symptombehandlung — die Ursache bleibt die
-Laufzeit-Kalibrierung in homee.
+Das ist eine Reparatur der Symptombehandlung — die Ursache liegt tiefer.
+
+### Ist die Drift überhaupt noch da?
+
+Derselbe Fehler steckte auch in `verschattung_nord_ost.yaml` (dort in fünf
+Zweigen) und ist mitkorrigiert.
+
+Beide Automationen schreiben jetzt einen Logbuch-Eintrag, wenn die Korrektur
+anläuft — mit Ziel- und Ist-Position und `entity_id` des Rolladens, also über
+die Entität filterbar:
+
+> **Verschattung West** — Positions-Drift erkannt (Ziel 78%, tatsächlich 25%) —
+> Zielposition erneut angefahren.
+
+Damit lässt sich die offene Frage beantworten, statt sie zu schätzen: taucht der
+Eintrag über mehrere Sonnentage nicht mehr auf, ist die Drift weg und die
+gesamte Absicherung — 20-Sekunden-Wartezeit, Nachkorrektur, `stop_cover` vor
+jedem Fahrbefehl — kann zurückgebaut werden. Das würde beide Automationen
+spürbar verschlanken.
+
+Ein Verdacht dazu: die Drift trat gemeinsam mit anderen unerklärten Schaltungen
+auf (Badlicht ging abends von selbst an). Beides passt zum Muster „ein zweiter
+Controller fährt dazwischen". Ist homee als Quelle raus, könnte die Drift
+mitverschwunden sein.
 
 ### HWR konnte nie wieder geöffnet werden
 

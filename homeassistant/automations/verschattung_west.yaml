@@ -141,6 +141,15 @@ actions:
                             entity_id: "{{ repeat.item.cover }}"
                           data:
                             position: "{{ positionen[repeat.item.cover] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item.cover }}"
+                            name: Verschattung West
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item.cover] }}%, tatsächlich
+                              {{ state_attr(repeat.item.cover,'current_position') }}%)
+                              - Zielposition erneut angefahren.
       - alias: Außentemp > 25°C UND Vorhersage > 30°C - proaktiv schließen
         conditions:
           - condition: or
@@ -197,6 +206,15 @@ actions:
                             entity_id: "{{ repeat.item.cover }}"
                           data:
                             position: "{{ positionen[repeat.item.cover] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item.cover }}"
+                            name: Verschattung West
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item.cover] }}%, tatsächlich
+                              {{ state_attr(repeat.item.cover,'current_position') }}%)
+                              - Zielposition erneut angefahren.
       - alias: Öffnen - beide Räume gemeinsam
         conditions:
           - condition: or

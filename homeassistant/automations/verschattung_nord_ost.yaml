@@ -139,6 +139,9 @@ actions:
         cover.wc: 50
         cover.wohnzimmer: 50
         cover.terrasse: 50
+      # Wie weit darf die tatsächliche Position unter der Zielposition liegen,
+      # bevor nachkorrigiert wird.
+      drift_toleranz: 5
       # Solange dieser Modus aktiv ist, wird cover.schlafzimmer nicht
       # angefasst - Tagschlaf nach der Nachtschicht.
       schlafzimmer_gesperrt: >
@@ -184,16 +187,30 @@ actions:
               position: "{{ positionen['cover.schlafzimmer'] }}"
           - delay:
               seconds: 20
+          # Zu weit zugefahren? Nicht nur "ganz zu": bei Drift bleibt der
+          # Rolladen auch mal auf halbem Weg stehen, sein State ist dann
+          # "open" und die Korrektur lief nie an.
           - if:
-              - condition: state
-                entity_id: cover.schlafzimmer
-                state: closed
+              - condition: template
+                value_template: >-
+                  {{ is_state('cover.schlafzimmer', 'closed')
+                     or (state_attr('cover.schlafzimmer', 'current_position') | int(0))
+                        < positionen['cover.schlafzimmer'] - drift_toleranz }}
             then:
               - action: cover.set_cover_position
                 target:
                   entity_id: cover.schlafzimmer
                 data:
                   position: "{{ positionen['cover.schlafzimmer'] }}"
+              - action: logbook.log
+                data:
+                  entity_id: cover.schlafzimmer
+                  name: Verschattung Nord/Ost
+                  message: >-
+                    Positions-Drift erkannt (Ziel
+                    {{ positionen['cover.schlafzimmer'] }}%, tatsächlich
+                    {{ state_attr('cover.schlafzimmer', 'current_position') }}%) -
+                    Zielposition erneut angefahren.
       - alias: Schlafzimmer - Öffnen
         conditions:
           - condition: or
@@ -256,16 +273,30 @@ actions:
               position: "{{ positionen['cover.badezimmer'] }}"
           - delay:
               seconds: 20
+          # Zu weit zugefahren? Nicht nur "ganz zu": bei Drift bleibt der
+          # Rolladen auch mal auf halbem Weg stehen, sein State ist dann
+          # "open" und die Korrektur lief nie an.
           - if:
-              - condition: state
-                entity_id: cover.badezimmer
-                state: closed
+              - condition: template
+                value_template: >-
+                  {{ is_state('cover.badezimmer', 'closed')
+                     or (state_attr('cover.badezimmer', 'current_position') | int(0))
+                        < positionen['cover.badezimmer'] - drift_toleranz }}
             then:
               - action: cover.set_cover_position
                 target:
                   entity_id: cover.badezimmer
                 data:
                   position: "{{ positionen['cover.badezimmer'] }}"
+              - action: logbook.log
+                data:
+                  entity_id: cover.badezimmer
+                  name: Verschattung Nord/Ost
+                  message: >-
+                    Positions-Drift erkannt (Ziel
+                    {{ positionen['cover.badezimmer'] }}%, tatsächlich
+                    {{ state_attr('cover.badezimmer', 'current_position') }}%) -
+                    Zielposition erneut angefahren.
       - alias: Bad - Öffnen
         conditions:
           - condition: or
@@ -324,16 +355,30 @@ actions:
               position: "{{ positionen['cover.wc'] }}"
           - delay:
               seconds: 20
+          # Zu weit zugefahren? Nicht nur "ganz zu": bei Drift bleibt der
+          # Rolladen auch mal auf halbem Weg stehen, sein State ist dann
+          # "open" und die Korrektur lief nie an.
           - if:
-              - condition: state
-                entity_id: cover.wc
-                state: closed
+              - condition: template
+                value_template: >-
+                  {{ is_state('cover.wc', 'closed')
+                     or (state_attr('cover.wc', 'current_position') | int(0))
+                        < positionen['cover.wc'] - drift_toleranz }}
             then:
               - action: cover.set_cover_position
                 target:
                   entity_id: cover.wc
                 data:
                   position: "{{ positionen['cover.wc'] }}"
+              - action: logbook.log
+                data:
+                  entity_id: cover.wc
+                  name: Verschattung Nord/Ost
+                  message: >-
+                    Positions-Drift erkannt (Ziel
+                    {{ positionen['cover.wc'] }}%, tatsächlich
+                    {{ state_attr('cover.wc', 'current_position') }}%) -
+                    Zielposition erneut angefahren.
       - alias: WC - Öffnen
         conditions:
           - condition: or
@@ -401,13 +446,25 @@ actions:
                         seconds: 20
                     - if:
                         - condition: template
-                          value_template: "{{ is_state(repeat.item.cover, 'closed') }}"
+                          value_template: >-
+                            {{ is_state(repeat.item.cover, 'closed')
+                               or (state_attr(repeat.item.cover, 'current_position') | int(0))
+                                  < positionen[repeat.item.cover] - drift_toleranz }}
                       then:
                         - action: cover.set_cover_position
                           target:
                             entity_id: "{{ repeat.item.cover }}"
                           data:
                             position: "{{ positionen[repeat.item.cover] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item.cover }}"
+                            name: Verschattung Nord/Ost
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item.cover] }}%, tatsächlich
+                              {{ state_attr(repeat.item.cover,'current_position') }}%)
+                              - Zielposition erneut angefahren.
       - alias: Wohnzimmer + Terrasse - Öffnen (nach Küchentemperatur)
         conditions:
           - condition: or
@@ -489,13 +546,25 @@ actions:
                         seconds: 20
                     - if:
                         - condition: template
-                          value_template: "{{ is_state(repeat.item.cover, 'closed') }}"
+                          value_template: >-
+                            {{ is_state(repeat.item.cover, 'closed')
+                               or (state_attr(repeat.item.cover, 'current_position') | int(0))
+                                  < positionen[repeat.item.cover] - drift_toleranz }}
                       then:
                         - action: cover.set_cover_position
                           target:
                             entity_id: "{{ repeat.item.cover }}"
                           data:
                             position: "{{ positionen[repeat.item.cover] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item.cover }}"
+                            name: Verschattung Nord/Ost
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item.cover] }}%, tatsächlich
+                              {{ state_attr(repeat.item.cover,'current_position') }}%)
+                              - Zielposition erneut angefahren.
       - alias: Außentemp unter 25°C - öffnen (nur wenn nicht komplett geschlossen)
         conditions:
           - condition: or
