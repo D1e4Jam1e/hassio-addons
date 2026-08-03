@@ -43,26 +43,34 @@ die Entität filterbar:
 > **Verschattung West** — Positions-Drift erkannt (Ziel 78%, tatsächlich 25%) —
 > Zielposition erneut angefahren.
 
-Damit lässt sich die offene Frage beantworten, statt sie zu schätzen: taucht der
-Eintrag über mehrere Sonnentage nicht mehr auf, ist die Drift weg und die
-gesamte Absicherung — 20-Sekunden-Wartezeit, Nachkorrektur, `stop_cover` vor
-jedem Fahrbefehl — kann zurückgebaut werden. Das würde beide Automationen
-spürbar verschlanken.
+### Die Ursache liegt in den Aktoren, nicht im Controller
 
-Ein Verdacht dazu: die Drift trat gemeinsam mit anderen unerklärten Schaltungen
-auf (Badlicht ging abends von selbst an). Beides passt zum Muster „ein zweiter
-Controller fährt dazwischen". Ist homee als Quelle raus, könnte die Drift
-mitverschwunden sein.
+Die Absicherung bleibt, unabhängig vom Controller: die **EnOcean-Aktoren selbst
+arbeiten mit Laufzeiten**, sie haben keine Positionssensoren. Die gemeldete
+Position ist also immer eine Schätzung aus „wie lange bin ich gefahren", nicht
+eine Messung. Ein Wechsel des Controllers — homee, wibutler, direkter
+Bus-Abgriff — ändert daran nichts.
 
-Dazu kommt der Wechsel auf wibutler (Matter): homee war laut der ursprünglichen
-Beschreibung **zeitbasiert** — die Position wurde aus der Fahrzeit geschätzt,
-und eine falsch kalibrierte Laufzeit erzeugt Drift zwangsläufig. Meldet die neue
-Anbindung die echte Position aus dem Antrieb, fällt die Ursache strukturell weg.
+Zwei Konsequenzen, die man beim Lesen der Logbuch-Einträge kennen muss:
+
+- **Sie zeigen nur, was der Aktor zugibt.** Meint er, er stehe auf 78%, während
+  er physisch tiefer steht, sieht Home Assistant davon nichts. Die Einträge sind
+  eine Untergrenze, kein vollständiges Bild.
+- **Der Fehler summiert sich nicht auf.** Motoren dieser Bauart erkennen die
+  Endlagen und setzen ihre Schätzung dort zurück. Weil beide Verschattungen
+  praktisch immer aus der oberen Endlage heraus verschatten (der periodische
+  Zweig verlangt sogar Position > 80), ist der beobachtete Versatz der Fehler
+  *einer einzelnen Fahrt* — also ein systematischer Kalibrierfehler, kein
+  wachsender Drift.
+
+Dass der HWR reproduzierbar zu weit fährt, passt genau dazu. Der wirksame
+Hebel ist die Laufzeit im Aktor; die Nachkorrektur hier fängt nur ab, was
+danach noch danebengeht.
 
 ### Nach dem Wechsel auf wibutler prüfen
 
-Die gesamte Positionslogik hängt an zwei Voraussetzungen, die integrations-
-abhängig sind:
+Die Drift bleibt (siehe oben), aber die Anbindung wechselt — und die gesamte
+Positionslogik hängt an zwei Voraussetzungen, die integrationsabhängig sind:
 
 1. **Attribut `current_position`** muss vorhanden sein. Fehlt es, hätte die
    Drift-Prüfung jeden Fahrbefehl als „auf 0% gedriftet" gewertet und das

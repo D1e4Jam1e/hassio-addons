@@ -22,9 +22,13 @@ description: >
     Außentemp < 25°C -> alle 5 wieder öffnen, ABER nur die, die gerade
       NICHT komplett geschlossen (0%, state "closed") sind.
 
-  Absicherung gegen Positions-Drift (homee, zeitbasiert), Stand 26.07.2026, nach
-  wiederholten Overshoot-Vorfällen (Schlafzimmer schoss trotz Ziel 50% mehrfach
-  bis auf 0% durch):
+  Absicherung gegen Positions-Drift, Stand 26.07.2026, nach wiederholten
+  Overshoot-Vorfällen (Schlafzimmer schoss trotz Ziel 50% mehrfach bis auf 0%
+  durch). Ursache sind NICHT Controller oder Anbindung, sondern die
+  EnOcean-Aktoren selbst: sie arbeiten mit Laufzeiten und haben keine
+  Positionssensoren. Die gemeldete Position ist eine Schätzung, keine Messung -
+  ein Wechsel des Controllers ändert daran nichts, die Absicherung bleibt also
+  nötig:
     - Nach jedem set_cover_position wird 20 Sek. gewartet und geprüft, ob
       der Rolladen trotzdem komplett geschlossen gelandet ist. Falls ja,
       wird EINMALIG nachkorrigiert (erneut auf Zielposition gesetzt),
