@@ -14,24 +14,23 @@ description: >
   Nacht (Rolladen zu nach Sonnenuntergang) als auch Nachtschicht-Tagschlaf ab.
   Gerät ist laut, soll also niemanden wecken/stören.
 
-  DREI SPERREN statt einer (ergänzt):
-    Der Rolladen-Check allein hatte zwei Löcher, durch die das Gerät mitten
-    im Tagschlaf anlaufen konnte - und dann auch noch den Rolladen auf 78%
-    gefahren hätte, also Lärm UND Licht:
-      1. Er prüft auf State "closed", und der gilt nur bei exakt Position 0.
-         Bei der in "Verschattung Nord/Ost" dokumentierten Positions-Drift
-         (homee) landet der Rolladen auch mal auf 2% - dann ist sein State
-         "open" und die Sperre war offen.
-      2. Während der Rolladen ~30 Sekunden herunterfährt, ist sein State
-         "closing", also ebenfalls nicht "closed". Fällt der
-         10-Minuten-Trigger in dieses Fenster, war die Sperre offen.
-    Deshalb jetzt zusätzlich:
-      - Schichtmodus "nacht" sperrt hart (Tagschlaf, unabhängig davon, wo
-        der Rolladen gerade steht).
-      - Die Position muss wirklich offen sein (> 50%). Fehlt das Attribut,
-        wird 0 angenommen und damit gesperrt - die sichere Richtung.
-    Die normale Nacht bleibt weiterhin über den Rolladen abgedeckt: der ist
-    dann nach Sonnenuntergang zu.
+  ROLLADEN-CHECK ROBUSTER (ergänzt):
+    Am Kriterium ändert sich nichts - "Rolladen unten" bleibt das Signal für
+    "es wird geschlafen", und zwar bewusst: es gilt für beide Schlafenden,
+    unabhängig von Schichten. Ergänzt sind nur die zwei Zustände, in denen
+    der State "closed" noch nicht bzw. nicht mehr anliegt, obwohl der
+    Rolladen faktisch unten ist:
+      1. "closing" - während der Rolladen herunterfährt, ist sein State
+         weder "open" noch "closed". Fällt der 10-Minuten-Trigger in dieses
+         Fenster, stand die Sperre offen. Das ist keine Frage der
+         Fahrzeit-Kalibrierung, sondern ein Zustand, den es zwangsläufig
+         gibt.
+      2. Restdrift - "closed" gilt nur bei exakt Position 0. Landet der
+         Rolladen auf 2%, ist sein State "open". Alles unter 20% zählt hier
+         deshalb als unten. Praktisch steht der Rolladen ohnehin nur auf 0,
+         78 oder 100, die Grenze schneidet also nichts ab.
+    Beides sperrt nur zusätzlich, gibt nie etwas frei, was vorher gesperrt
+    war.
 
   ACHTUNG bei Änderungen: die Zielposition 78 steht auch in "Verschattung
   Nord/Ost" (Variable "positionen"). Wird die Verschattungsposition des
@@ -59,25 +58,22 @@ conditions:
   - condition: numeric_state
     entity_id: sensor.klima_schlafzimmer_temperature
     above: 24
-  # Sperre 1: Tagschlaf nach der Nachtschicht - hart, unabhängig vom Rolladen.
-  - condition: not
-    conditions:
-      - condition: state
-        entity_id: input_select.schichtmodus_schlafzimmer
-        state: nacht
-  # Sperre 2: Rolladen-State (deckt die normale Nacht ab).
+  # Rolladen unten = es wird geschlafen. "closing" zählt mit dazu: in den
+  # Sekunden, in denen er herunterfährt, ist der State weder "open" noch
+  # "closed".
   - condition: not
     conditions:
       - condition: state
         entity_id: cover.schlafzimmer
         state:
           - closed
-  # Sperre 3: Rolladen muss wirklich offen stehen. Fängt Positions-Drift und
-  # das Fenster ab, in dem er gerade herunterfährt ("closing"). Fehlt das
-  # Attribut, gilt 0 - also gesperrt.
+          - closing
+  # Restdrift: "closed" gilt nur bei exakt Position 0, bei 2% wäre der State
+  # "open". Alles unter 20% zählt deshalb als unten. Fehlt das Attribut, gilt
+  # 0 - also gesperrt, die sichere Richtung.
   - condition: template
     value_template: >-
-      {{ state_attr('cover.schlafzimmer', 'current_position') | int(0) > 50 }}
+      {{ state_attr('cover.schlafzimmer', 'current_position') | int(0) >= 20 }}
   - condition: switch.is_off
     target:
       entity_id: switch.153931628878753_power

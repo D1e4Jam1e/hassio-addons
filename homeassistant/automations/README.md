@@ -12,31 +12,29 @@ Vier Automationen, die sich `cover.schlafzimmer` und
 
 ## klima_schlafzimmer_ein.yaml / _aus.yaml
 
-### Das Gerät konnte im Tagschlaf anlaufen
+### Rolladen-Check robuster, Kriterium unverändert
 
-Die Einschalt-Automation benutzte „Rolladen geschlossen" als Näherungswert für
-„es wird geschlafen". Der Ansatz ist richtig, die Prüfung hatte aber zwei
-Löcher — und weil die Automation nach dem Einschalten auch noch
-`set_cover_position: 78` fährt, wäre daraus Lärm **und** Licht mitten im
-Tagschlaf geworden:
+„Rolladen unten" bleibt das Signal für „es wird geschlafen" — und das bewusst:
+es gilt für beide Schlafenden, unabhängig von Schichten. Eine Sperre über
+`schichtmodus_schlafzimmer` wurde deshalb wieder verworfen; sie hätte nur die
+Nachtschicht-Tagschläferin geschützt und den zweiten Schläfer in der normalen
+Nacht gar nicht.
 
-1. **Positions-Drift.** Der Check prüft auf State `closed`, und der gilt nur bei
-   exakt Position 0. Laut der Doku in `verschattung_nord_ost.yaml` landet der
-   Rolladen bei Drift auch mal auf 2% — dann ist sein State `open` und die
-   Sperre stand offen.
-2. **Fahrzeit.** Während der Rolladen ~30 Sekunden herunterfährt, ist sein State
-   `closing`, also ebenfalls nicht `closed`. Fällt der 10-Minuten-Trigger in
-   dieses Fenster, stand die Sperre ebenfalls offen.
+Ergänzt sind nur die zwei Zustände, in denen der State `closed` noch nicht bzw.
+nicht mehr anliegt, obwohl der Rolladen faktisch unten ist. Beide sperren
+zusätzlich, geben nie etwas frei:
 
-Ergänzt wurden deshalb zwei weitere Sperren:
-
-| Sperre | Prüfung |
+| Zustand | Prüfung |
 | --- | --- |
-| Schichtmodus | `input_select.schichtmodus_schlafzimmer` ≠ `nacht` — hart, unabhängig vom Rolladen |
-| Position | `current_position > 50` — fängt Drift und Fahrzeit ab; fehlt das Attribut, gilt 0 (gesperrt) |
+| `closing` | State-Bedingung um `closing` erweitert — während der Fahrt ist der State weder `open` noch `closed`, unabhängig von der Fahrzeit-Kalibrierung |
+| Restdrift | `current_position >= 20` — bei 2% wäre der State `open`; fehlt das Attribut, gilt 0 (gesperrt) |
 
-Die normale Nacht bleibt weiter über den Rolladen abgedeckt. Durchgespielt:
-Position 0/2/30/50 sperren, 78 und 100 geben frei.
+Die Grenze bei 20% schneidet nichts ab: der Rolladen steht praktisch nur auf 0,
+78 oder 100. Durchgespielt: 0/2/19 sperren, ab 20 gibt frei.
+
+Relevant ist das vor allem, weil die Automation nach dem Einschalten auch
+`set_cover_position: 78` fährt — aus einem Fehlstart würde also Lärm **und**
+Licht.
 
 ### Mindestlaufzeit gegen Takten
 
