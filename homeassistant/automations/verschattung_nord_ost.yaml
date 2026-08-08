@@ -143,6 +143,13 @@ actions:
         cover.wc: 50
         cover.wohnzimmer: 50
         cover.terrasse: 50
+      # EINZIGE Stelle, an der die Polarität des Türkontakts steht. Meldet der
+      # Sensor bei offener Tür "off" statt "on", ist hier 'off' einzutragen -
+      # dann stimmt es in allen Zweigen auf einmal. Gleicher Wert muss in
+      # "Rolladen Wohnzimmer + Terrasse" gesetzt sein (Variable tuer_offen
+      # und der Trigger door_open/door_closed).
+      tuer_offen: >-
+        {{ is_state('binary_sensor.terrassenturkontakt_contact', 'on') }}
       # Wie weit darf die tatsächliche Position unter der Zielposition liegen,
       # bevor nachkorrigiert wird.
       drift_toleranz: 5
@@ -432,9 +439,7 @@ actions:
                 - if:
                     - condition: template
                       value_template: >
-                        {{ (not repeat.item.check_door or
-                        is_state('binary_sensor.terrassenturkontakt_contact',
-                        'off'))
+                        {{ (not repeat.item.check_door or not tuer_offen)
                            and not is_state(repeat.item.cover, 'closed')
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
                                  or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - positionen[repeat.item.cover]) | abs > 5) ) }}
@@ -532,9 +537,7 @@ actions:
                 - if:
                     - condition: template
                       value_template: >
-                        {{ (not repeat.item.check_door or
-                        is_state('binary_sensor.terrassenturkontakt_contact',
-                        'off'))
+                        {{ (not repeat.item.check_door or not tuer_offen)
                            and not is_state(repeat.item.cover, 'closed')
                            and not (repeat.item.cover == 'cover.schlafzimmer' and schlafzimmer_gesperrt)
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)

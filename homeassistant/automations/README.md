@@ -60,8 +60,36 @@ genau dann läuft dieser Zweig.
 
 ### Rolladen Terrasse bleibt oben, solange die Tür offen ist
 
-Das war schon weitgehend gebaut und ist jetzt lückenlos. Vier Wege könnten die
-Terrasse zufahren, alle sind abgedeckt:
+**Offener Punkt: die Polarität des Türkontakts.** Beobachtet wurde, dass der
+Rolladen bei *offener* Tür in Verschattungsposition fährt — man sitzt draußen
+und steht plötzlich vor einem heruntergefahrenen Rolladen.
+
+Der Guard in der Verschattung lautet sinngemäß „nur schließen, wenn der Kontakt
+`off` ist". Fährt der Rolladen bei offener Tür trotzdem zu, meldet der Kontakt
+bei offener Tür `off` — die Polarität ist dann invertiert (`on` = Kontakt
+geschlossen = Tür zu). Das erklärt das Verhalten vollständig, und zwar in beide
+Richtungen: der Trigger `to: 'on'` fährt den Rolladen dann hoch, wenn man die
+Tür *schließt*.
+
+Prüfen: Tür öffnen, dann *Entwicklerwerkzeuge → Zustände*,
+`binary_sensor.terrassenturkontakt_contact` ansehen. Zeigt er bei offener Tür
+`off`, ist es das.
+
+Die Polarität steht jetzt in beiden Automationen in genau einer Variable
+(`tuer_offen`). Bei invertiertem Sensor sind es vier Stellen insgesamt:
+
+| Datei | Stelle |
+| --- | --- |
+| `verschattung_nord_ost.yaml` | Variable `tuer_offen` |
+| `rolladen_wohnzimmer_terrasse.yaml` | Variable `tuer_offen` |
+| `rolladen_wohnzimmer_terrasse.yaml` | Trigger `door_open` (`to:`) |
+| `rolladen_wohnzimmer_terrasse.yaml` | Trigger `door_closed` (`to:`) |
+
+Die beiden Trigger lassen sich nicht über eine Variable steuern — dort muss der
+Wert direkt getauscht werden.
+
+Sobald das geklärt ist, sind vier Wege abgedeckt, auf denen die Terrasse
+zufahren könnte:
 
 | Weg | Absicherung |
 | --- | --- |
