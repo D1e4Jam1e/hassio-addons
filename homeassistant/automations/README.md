@@ -103,17 +103,31 @@ Damit sind alle vier Wege abgedeckt, auf denen die Terrasse zufahren könnte:
 Ein **manuelles** Schließen bei offener Tür bleibt bewusst möglich — eine
 Automation, die das zurückdreht, würde jede Handbedienung bekämpfen.
 
-### Offen: das 23:00-Limit kennt den Party-Schalter nicht
+### Der Party-Schalter ist der „wir sind draußen"-Riegel
 
-So entworfen — „schließt IMMER spätestens um 23:00, auch bei aktivem
-Party-Override". Mit einem Türkontakt, der Meldungen verschluckt, ist das aber
-genau der Aussperr-Fall: sitzt um 23:00 noch jemand draußen und der Sensor hat
-das Öffnen verpasst, fährt der Rolladen herunter. Nach 23 Uhr merkt das
-womöglich niemand mehr im Haus.
+`input_boolean.party_terrasse` hebelt jetzt **jedes** automatische Schließen der
+Terrasse aus, auch das 23:00-Limit — gute Partys sind um 23:00 nicht vorbei.
+Zusammen mit der Sperre in der Verschattung ist er damit der einzige Schutz, der
+nicht an der Zuverlässigkeit des Türkontakts hängt.
 
-Nicht geändert, weil es eine bewusste Entscheidung war. Zwei Auswege, falls es
-stören sollte: das Limit auch am Party-Schalter vorbeiführen (dann schließt bei
-aktiver Party gar nichts automatisch), oder es auf eine spätere Uhrzeit legen.
+Damit daraus kein dauerhaft offener Rolladen wird, hängen zwei Gegenstücke dran:
+
+- **Party aus → nachholen.** Ein Trigger auf `party_terrasse` → `off` schließt
+  die Terrasse, sofern der reguläre Zeitpunkt vorbei und die Tür zu ist. Ist die
+  Tür noch offen, übernimmt der „Tür geht zu"-Zweig.
+- **07:00 → Schalter abräumen.** Bleibt er versehentlich an, wäre die Terrasse
+  dauerhaft von Verschattung *und* abendlichem Schließen ausgenommen. Der
+  Morgen-Trigger setzt ihn zurück und schreibt einen Logbuch-Eintrag.
+
+Automatisch geschlossen wird damit nur noch (durchgespielt über Tageszeit ×
+Gästemodus × Party):
+
+| Lage | Schließen |
+| --- | --- |
+| Normal, nach Sonnenuntergang | ja |
+| Gästemodus, ab 20:00 | ja |
+| Party aktiv, zu jeder Zeit | nein |
+| Tagsüber | nein |
 
 ## verschattung_west.yaml
 

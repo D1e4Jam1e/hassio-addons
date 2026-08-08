@@ -16,11 +16,18 @@ description: >
     Runter: regulärer Zeitpunkt ist Sonnenuntergang (normal) bzw. 20:00
       (Gästemodus) - ABER:
         - Party-Override (input_boolean.party_terrasse): wenn AN, wird
-          das reguläre Schließen ausgesetzt (Terrasse bleibt offen).
-        - Hard-Limit 23:00: schließt IMMER spätestens um 23:00, auch bei
-          aktivem Party-Override.
+          gar nicht automatisch geschlossen - auch das 23:00-Limit nicht
+          (gute Partys sind um 23:00 nicht vorbei). Der Schalter sperrt
+          zusätzlich die Verschattung für die Terrasse.
+          Geschlossen wird, sobald der Schalter ausgeht (Trigger
+          party_off) - sofern der reguläre Zeitpunkt dann vorbei ist.
+          Vergisst man ihn, räumt ihn der 07:00-Trigger am nächsten
+          Morgen ab, sonst bliebe die Terrasse dauerhaft ausgenommen.
+        - Hard-Limit 23:00: schließt spätestens um 23:00 - außer bei
+          aktivem Party-Schalter oder offener Tür.
         - Aussperrsicherung: bei offener Terrassentür wird NICHT
-          geschlossen.
+          geschlossen. Der Türkontakt gilt nur dann als "zu", wenn er das
+          ausdrücklich meldet - er überträgt seinen Status nicht immer.
 
     Tür-Override: Sobald binary_sensor.terrassenturkontakt_contact auf
     "on" (Tür offen) wechselt, fährt der Terrassen-Rolladen sofort
@@ -85,6 +92,15 @@ triggers:
     entity_id: binary_sensor.terrassenturkontakt_contact
     to: "off"
     id: door_closed
+  # Party beendet -> ausgesetztes Schließen nachholen.
+  - trigger: state
+    entity_id: input_boolean.party_terrasse
+    to: "off"
+    id: party_off
+  # Vergessenen Party-Schalter morgens abräumen.
+  - trigger: time
+    at: "07:00:00"
+    id: party_reset
 conditions: []
 actions:
   - variables:
@@ -96,11 +112,12 @@ actions:
       # bezieht. Der Nachhol-Zweig läuft aber gerade nachts.
       dunkel: "{{ is_state('sun.sun', 'below_horizon') }}"
       jetzt: "{{ now().strftime('%H:%M') }}"
-      nach_hard_cap: "{{ jetzt >= '23:00' or jetzt < '07:00' }}"
       # Wäre die Terrasse zu diesem Zeitpunkt regulär schon unten?
+      # Bei aktiver Party nie - dann schließt gar nichts automatisch, auch
+      # nicht das 23:00-Limit. Nachgeholt wird, sobald der Party-Schalter
+      # ausgeht (Trigger party_off).
       schliesszeit_vorbei: >-
-        {% if party %}{{ nach_hard_cap }}
-        {% else %}{{ dunkel or (gaeste and jetzt >= '20:00') }}{% endif %}
+        {{ (not party) and (dunkel or (gaeste and jetzt >= '20:00')) }}
       # Der Türkontakt überträgt seinen Status nicht immer zuverlässig. Die
       # Tür gilt deshalb NUR dann als zu, wenn er das ausdrücklich meldet -
       # "unknown", "unavailable" und ein verpasstes Update zählen als offen.
@@ -236,14 +253,26 @@ actions:
               - action: cover.close_cover
                 target:
                   entity_id: cover.terrasse
-      - alias: >-
-          Terrasse Runterfahren - 23:00 Hard-Limit (auch bei aktivem
-          Party-Override)
+      - alias: Terrasse Runterfahren - 23:00 Hard-Limit
         conditions:
           - condition: trigger
             id: hard_cap
         sequence:
           - choose:
+              # Party läuft -> Limit ausgesetzt. Gute Partys sind um 23:00
+              # nicht vorbei. Geschlossen wird, sobald der Schalter ausgeht.
+              - conditions:
+                  - condition: template
+                    value_template: "{{ party }}"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      entity_id: cover.terrasse
+                      name: Rolladen Terrasse
+                      message: >-
+                        23:00-Limit erreicht, aber der Party-Schalter ist an -
+                        Rolladen bleibt oben. Er schließt, sobald der Schalter
+                        ausgeschaltet wird.
               - conditions:
                   - condition: template
                     value_template: "{{ tuer_offen }}"
@@ -260,6 +289,48 @@ actions:
               - action: cover.close_cover
                 target:
                   entity_id: cover.terrasse
+      - alias: Terrasse Runterfahren - Party beendet, nachholen
+        conditions:
+          - condition: trigger
+            id: party_off
+          - condition: template
+            value_template: "{{ schliesszeit_vorbei }}"
+          - condition: template
+            value_template: "{{ not tuer_offen }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.terrasse
+                state: closed
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.terrasse
+          - action: logbook.log
+            data:
+              entity_id: cover.terrasse
+              name: Rolladen Terrasse
+              message: >-
+                Party beendet - das ausgesetzte Schließen nachgeholt.
+      - alias: Party-Schalter morgens zurücksetzen (falls vergessen)
+        conditions:
+          - condition: trigger
+            id: party_reset
+          - condition: state
+            entity_id: input_boolean.party_terrasse
+            state: "on"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.party_terrasse
+          - action: logbook.log
+            data:
+              entity_id: input_boolean.party_terrasse
+              name: Rolladen Terrasse
+              message: >-
+                Party-Schalter war noch an - morgens automatisch
+                zurückgesetzt. Sonst bliebe die Terrasse dauerhaft von der
+                Verschattung und vom abendlichen Schließen ausgenommen.
       - alias: >-
           Terrasse Runterfahren - Tür zu, verpasstes Schließen nachholen
         conditions:
