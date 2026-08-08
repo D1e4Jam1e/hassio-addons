@@ -58,52 +58,62 @@ Für „ist es dunkel" wird `sun.sun` = `below_horizon` benutzt, nicht
 `condition: sun / after: sunset` — letzteres ist nach Mitternacht falsch, und
 genau dann läuft dieser Zweig.
 
-### Rolladen Terrasse bleibt oben, solange die Tür offen ist
+### Rolladen Terrasse: Aussperrschutz
 
-**Offener Punkt: die Polarität des Türkontakts.** Beobachtet wurde, dass der
-Rolladen bei *offener* Tür in Verschattungsposition fährt — man sitzt draußen
-und steht plötzlich vor einem heruntergefahrenen Rolladen.
+Beobachtet: der Rolladen fuhr bei *offener* Tür in Verschattungsposition — man
+sitzt draußen und steht vor einem heruntergefahrenen Rolladen.
 
-Der Guard in der Verschattung lautet sinngemäß „nur schließen, wenn der Kontakt
-`off` ist". Fährt der Rolladen bei offener Tür trotzdem zu, meldet der Kontakt
-bei offener Tür `off` — die Polarität ist dann invertiert (`on` = Kontakt
-geschlossen = Tür zu). Das erklärt das Verhalten vollständig, und zwar in beide
-Richtungen: der Trigger `to: 'on'` fährt den Rolladen dann hoch, wenn man die
-Tür *schließt*.
+Der Türkontakt ist **nicht** invertiert. Er überträgt seinen Status aber nicht
+immer. Verpasst er das Öffnen, hält Home Assistant die Tür für zu, der Guard in
+der Verschattung gibt frei, und der Rolladen fährt herunter. Ein Guard, der
+allein an diesem Sensor hängt, kann das prinzipiell nicht verhindern.
 
-Prüfen: Tür öffnen, dann *Entwicklerwerkzeuge → Zustände*,
-`binary_sensor.terrassenturkontakt_contact` ansehen. Zeigt er bei offener Tür
-`off`, ist es das.
+Zwei Konsequenzen:
 
-Die Polarität steht jetzt in beiden Automationen in genau einer Variable
-(`tuer_offen`). Bei invertiertem Sensor sind es vier Stellen insgesamt:
+**Der Türkontakt zählt nur noch als „zu", wenn er das ausdrücklich meldet.**
+`unknown`, `unavailable` und ein verpasstes Update gelten als offen. Bei der
+Verschattung kostet diese Fehlerrichtung nur etwas Wärme; beim abendlichen
+Schließen heißt sie, dass der Rolladen oben bleibt, bis der Sensor wieder meldet
+oder von Hand gefahren wird. Das ist der Preis dafür, dass niemand ausgesperrt
+wird.
 
-| Datei | Stelle |
-| --- | --- |
-| `verschattung_nord_ost.yaml` | Variable `tuer_offen` |
-| `rolladen_wohnzimmer_terrasse.yaml` | Variable `tuer_offen` |
-| `rolladen_wohnzimmer_terrasse.yaml` | Trigger `door_open` (`to:`) |
-| `rolladen_wohnzimmer_terrasse.yaml` | Trigger `door_closed` (`to:`) |
+**Der Party-Schalter sperrt die Terrasse zusätzlich.** `input_boolean.party_terrasse`
+ist damit mehr als der Party-Modus: er ist der „wir sind draußen"-Riegel, und
+die einzige Absicherung, die nicht an der Zuverlässigkeit des Sensors hängt. Für
+längere Aufenthalte draußen ist er der verlässliche Weg.
 
-Die beiden Trigger lassen sich nicht über eine Variable steuern — dort muss der
-Wert direkt getauscht werden.
+Wahrheitstabelle der Verschattung für `cover.terrasse` (durchgespielt):
 
-Sobald das geklärt ist, sind vier Wege abgedeckt, auf denen die Terrasse
-zufahren könnte:
+| Türkontakt | Party | Verschattung greift |
+| --- | --- | --- |
+| `off` (zu) | aus | ja |
+| `off` (zu) | an | nein |
+| `on` (offen) | beliebig | nein |
+| `unknown` / `unavailable` | beliebig | nein |
+
+Damit sind alle vier Wege abgedeckt, auf denen die Terrasse zufahren könnte:
 
 | Weg | Absicherung |
 | --- | --- |
-| Regulärer Schließzeitpunkt | prüft Tür, setzt aus |
-| 23:00 Hard-Limit | prüft Tür, setzt aus |
-| Verschattung, Zweig „Wohnzimmer + Terrasse" | `check_door: true` |
-| Verschattung, Zweig „alle 5 proaktiv" | `check_door: true` |
+| Regulärer Schließzeitpunkt | Tür + Party |
+| 23:00 Hard-Limit | nur Tür — siehe unten |
+| Verschattung, Zweig „Wohnzimmer + Terrasse" | Tür + Party |
+| Verschattung, Zweig „alle 5 proaktiv" | Tür + Party |
 
-Dazu fährt der Rolladen beim Öffnen der Tür aktiv hoch, falls er unten stand.
+Ein **manuelles** Schließen bei offener Tür bleibt bewusst möglich — eine
+Automation, die das zurückdreht, würde jede Handbedienung bekämpfen.
 
-Nicht abgedeckt — bewusst: ein **manuelles** Schließen bei offener Tür bleibt
-möglich. Eine Automation, die das zurückdreht, würde jede Handbedienung
-bekämpfen. Ebenfalls zu prüfen wäre, ob die generische „Rolladen Zeitsteuerung"
-`cover.terrasse` wirklich nicht anfasst — die liegt hier nicht vor.
+### Offen: das 23:00-Limit kennt den Party-Schalter nicht
+
+So entworfen — „schließt IMMER spätestens um 23:00, auch bei aktivem
+Party-Override". Mit einem Türkontakt, der Meldungen verschluckt, ist das aber
+genau der Aussperr-Fall: sitzt um 23:00 noch jemand draußen und der Sensor hat
+das Öffnen verpasst, fährt der Rolladen herunter. Nach 23 Uhr merkt das
+womöglich niemand mehr im Haus.
+
+Nicht geändert, weil es eine bewusste Entscheidung war. Zwei Auswege, falls es
+stören sollte: das Limit auch am Party-Schalter vorbeiführen (dann schließt bei
+aktiver Party gar nichts automatisch), oder es auf eine spätere Uhrzeit legen.
 
 ## verschattung_west.yaml
 

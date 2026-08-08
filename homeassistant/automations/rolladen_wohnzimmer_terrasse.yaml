@@ -101,8 +101,14 @@ actions:
       schliesszeit_vorbei: >-
         {% if party %}{{ nach_hard_cap }}
         {% else %}{{ dunkel or (gaeste and jetzt >= '20:00') }}{% endif %}
+      # Der Türkontakt überträgt seinen Status nicht immer zuverlässig. Die
+      # Tür gilt deshalb NUR dann als zu, wenn er das ausdrücklich meldet -
+      # "unknown", "unavailable" und ein verpasstes Update zählen als offen.
+      # Fehlerrichtung: im Zweifel nicht schließen, damit niemand ausgesperrt
+      # wird. Preis: fällt der Sensor ganz aus, bleibt der Terrassen-Rolladen
+      # oben, bis er wieder meldet oder von Hand gefahren wird.
       tuer_offen: >-
-        {{ is_state('binary_sensor.terrassenturkontakt_contact', 'on') }}
+        {{ not is_state('binary_sensor.terrassenturkontakt_contact', 'off') }}
   - choose:
       - alias: Hochfahren - Gästemodus (fix 09:30)
         conditions:
