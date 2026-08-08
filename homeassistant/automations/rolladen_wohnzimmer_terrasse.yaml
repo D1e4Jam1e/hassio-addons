@@ -1,0 +1,289 @@
+alias: Rolladen Wohnzimmer + Terrasse (Sonderlogik)
+description: >
+  Eigene Automation für cover.wohnzimmer und cover.terrasse (ein gemeinsamer
+  Raum), getrennt von der generischen "Rolladen Zeitsteuerung" wegen der
+  Sonderfälle unten. Verschattung läuft weiterhin separat (Verschattung
+  Nord/Ost).
+
+  WOHNZIMMER (einfach):
+    Normal (Gästemodus AUS): Rauf mit Sonnenaufgang (nicht vor 07:00),
+      Runter mit Sonnenuntergang.
+    Gästemodus AN: Rauf fix 09:30, Runter fix 20:00. Zusätzlich koppelt
+      NUR im Gästemodus switch.schrankwand mit.
+
+  TERRASSE (Sonderfälle):
+    Rauf: wie Wohnzimmer (Sonnenaufgang/07:00 oder Gästemodus 09:30).
+    Runter: regulärer Zeitpunkt ist Sonnenuntergang (normal) bzw. 20:00
+      (Gästemodus) - ABER:
+        - Party-Override (input_boolean.party_terrasse): wenn AN, wird
+          das reguläre Schließen ausgesetzt (Terrasse bleibt offen).
+        - Hard-Limit 23:00: schließt IMMER spätestens um 23:00, auch bei
+          aktivem Party-Override.
+        - Aussperrsicherung: bei offener Terrassentür wird NICHT
+          geschlossen.
+
+    Tür-Override: Sobald binary_sensor.terrassenturkontakt_contact auf
+    "on" (Tür offen) wechselt, fährt der Terrassen-Rolladen sofort
+    komplett hoch, falls er nicht schon oben ist (z.B. weil Verschattung
+    Nord/Ost ihn zuvor wegen Hitze zugefahren hat). Damit das
+    Offenbleiben nicht sofort wieder rückgängig gemacht wird, überspringt
+    Verschattung Nord/Ost die Terrasse (nicht Wohnzimmer) beim Schließen,
+    solange die Tür offen ist. Schließt die Tür wieder, greift die
+    normale Verschattungslogik über deren periodic_check innerhalb von
+    max. 10 Minuten von selbst wieder.
+
+  AUSSPERRSICHERUNG OHNE WARTEN (geändert):
+    Vorher wartete jeder Schließ-Zweig per wait_template darauf, dass die
+    Tür zugeht - unbegrenzt. In Kombination mit "mode: restart" war das
+    ein Loch: JEDER neue Trigger bricht einen laufenden Ablauf ab, auch
+    der Trigger "Tür geöffnet". Ein Sommerabend mit Leuten, die raus- und
+    reingehen, hat also den wartenden Sonnenuntergangs-Ablauf gekillt -
+    und danach schloss nichts mehr nach, weil das Warten der einzige
+    Mechanismus war. Das 23:00-Limit konnte auf demselben Weg gekillt
+    werden.
+    Ebenso verloren ging das Warten bei einem Neustart von Home
+    Assistant.
+    Statt zu warten wird jetzt beim Schließzeitpunkt geprüft: Tür offen ->
+    gar nicht schließen, nur protokollieren. Das Nachholen übernimmt ein
+    eigener Trigger auf "Tür geht zu". Der ist unabhängig von laufenden
+    Abläufen und übersteht Neustarts.
+    Dieser Nachhol-Zweig schließt auch den Fall, dass jemand nachts um
+    02:00 die Terrassentür öffnet: der Rolladen fährt dann hoch (richtig,
+    sonst sperrt man sich aus), und bisher blieb er bis zum nächsten
+    Sonnenuntergang oben, weil 23:00 längst vorbei war.
+
+  Voraussetzung: zwei Helfer in HA anlegen (Einstellungen -> Geräte & Dienste ->
+  Helfer):
+    input_boolean.gaestemodus_wohnzimmer  (Ein/Aus-Schalter)
+    input_boolean.party_terrasse          (Ein/Aus-Schalter)
+  sowie den vorhandenen binary_sensor.terrassenturkontakt_contact.
+triggers:
+  - trigger: sun
+    event: sunrise
+    id: sunrise
+  - trigger: time
+    at: "07:00:00"
+    id: floor_up
+  - trigger: time
+    at: "09:30:00"
+    id: guest_up
+  - trigger: sun
+    event: sunset
+    id: sunset
+  - trigger: time
+    at: "20:00:00"
+    id: guest_down
+  - trigger: time
+    at: "23:00:00"
+    id: hard_cap
+  - trigger: state
+    entity_id: binary_sensor.terrassenturkontakt_contact
+    to: "on"
+    id: door_open
+  # Nachholen, wenn zum regulären Schließzeitpunkt die Tür offen war.
+  - trigger: state
+    entity_id: binary_sensor.terrassenturkontakt_contact
+    to: "off"
+    id: door_closed
+conditions: []
+actions:
+  - variables:
+      gaeste: "{{ is_state('input_boolean.gaestemodus_wohnzimmer', 'on') }}"
+      party: "{{ is_state('input_boolean.party_terrasse', 'on') }}"
+      # "below_horizon" statt "condition: sun after: sunset": letzteres ist
+      # nur zwischen Sonnenuntergang und Mitternacht wahr und wird danach
+      # falsch, weil es sich dann auf den Sonnenuntergang des neuen Tages
+      # bezieht. Der Nachhol-Zweig läuft aber gerade nachts.
+      dunkel: "{{ is_state('sun.sun', 'below_horizon') }}"
+      jetzt: "{{ now().strftime('%H:%M') }}"
+      nach_hard_cap: "{{ jetzt >= '23:00' or jetzt < '07:00' }}"
+      # Wäre die Terrasse zu diesem Zeitpunkt regulär schon unten?
+      schliesszeit_vorbei: >-
+        {% if party %}{{ nach_hard_cap }}
+        {% else %}{{ dunkel or (gaeste and jetzt >= '20:00') }}{% endif %}
+      tuer_offen: >-
+        {{ is_state('binary_sensor.terrassenturkontakt_contact', 'on') }}
+  - choose:
+      - alias: Hochfahren - Gästemodus (fix 09:30)
+        conditions:
+          - condition: trigger
+            id: guest_up
+          - condition: state
+            entity_id: input_boolean.gaestemodus_wohnzimmer
+            state: "on"
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id:
+                - cover.wohnzimmer
+                - cover.terrasse
+          - action: switch.turn_on
+            target:
+              entity_id: switch.schrankwand
+      - alias: Hochfahren - normal, Sonnenaufgang (nur wenn schon nach 07:00)
+        conditions:
+          - condition: trigger
+            id: sunrise
+          - condition: state
+            entity_id: input_boolean.gaestemodus_wohnzimmer
+            state: "off"
+          - condition: time
+            after: "07:00:00"
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id:
+                - cover.wohnzimmer
+                - cover.terrasse
+      - alias: Hochfahren - normal, Boden-Zeit 07:00 (falls Sonnenaufgang früher war)
+        conditions:
+          - condition: trigger
+            id: floor_up
+          - condition: state
+            entity_id: input_boolean.gaestemodus_wohnzimmer
+            state: "off"
+          - condition: sun
+            after: sunrise
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id:
+                - cover.wohnzimmer
+                - cover.terrasse
+      - alias: Terrasse Hochfahren - Tür geöffnet (bleibt oben während Tür offen)
+        conditions:
+          - condition: trigger
+            id: door_open
+        sequence:
+          - if:
+              - condition: template
+                value_template: >
+                  {{ (state_attr('cover.terrasse','current_position') | int(0))
+                  < 95 }}
+            then:
+              - action: cover.open_cover
+                target:
+                  entity_id: cover.terrasse
+      - alias: Wohnzimmer Runterfahren - Gästemodus (fix 20:00)
+        conditions:
+          - condition: trigger
+            id: guest_down
+          - condition: state
+            entity_id: input_boolean.gaestemodus_wohnzimmer
+            state: "on"
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.wohnzimmer
+          - action: switch.turn_off
+            target:
+              entity_id: switch.schrankwand
+      - alias: Wohnzimmer Runterfahren - normal, Sonnenuntergang
+        conditions:
+          - condition: trigger
+            id: sunset
+          - condition: state
+            entity_id: input_boolean.gaestemodus_wohnzimmer
+            state: "off"
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.wohnzimmer
+      - alias: Terrasse Runterfahren - regulärer Zeitpunkt, außer Party aktiv
+        conditions:
+          - condition: or
+            conditions:
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: sunset
+                  - condition: state
+                    entity_id: input_boolean.gaestemodus_wohnzimmer
+                    state: "off"
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: guest_down
+                  - condition: state
+                    entity_id: input_boolean.gaestemodus_wohnzimmer
+                    state: "on"
+          - condition: state
+            entity_id: input_boolean.party_terrasse
+            state: "off"
+        sequence:
+          - choose:
+              # Aussperrsicherung: bei offener Tür gar nicht erst schließen.
+              # Der Zweig "Tür zu" unten holt es nach.
+              - conditions:
+                  - condition: template
+                    value_template: "{{ tuer_offen }}"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      entity_id: cover.terrasse
+                      name: Rolladen Terrasse
+                      message: >-
+                        Regulärer Schließzeitpunkt, aber die Terrassentür ist
+                        offen - Rolladen bleibt oben. Er schließt, sobald die
+                        Tür zugeht.
+            default:
+              - action: cover.close_cover
+                target:
+                  entity_id: cover.terrasse
+      - alias: >-
+          Terrasse Runterfahren - 23:00 Hard-Limit (auch bei aktivem
+          Party-Override)
+        conditions:
+          - condition: trigger
+            id: hard_cap
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ tuer_offen }}"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      entity_id: cover.terrasse
+                      name: Rolladen Terrasse
+                      message: >-
+                        23:00-Limit erreicht, aber die Terrassentür ist offen -
+                        Rolladen bleibt oben. Er schließt, sobald die Tür
+                        zugeht.
+            default:
+              - action: cover.close_cover
+                target:
+                  entity_id: cover.terrasse
+      - alias: >-
+          Terrasse Runterfahren - Tür zu, verpasstes Schließen nachholen
+        conditions:
+          - condition: trigger
+            id: door_closed
+          # Wäre sie jetzt regulär unten? (Party berücksichtigt, siehe
+          # Variable oben.)
+          - condition: template
+            value_template: "{{ schliesszeit_vorbei }}"
+          # Steht sie schon unten, ist nichts zu tun - spart einen
+          # überflüssigen Fahrbefehl und einen Logbuch-Eintrag.
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.terrasse
+                state: closed
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: cover.terrasse
+          - action: logbook.log
+            data:
+              entity_id: cover.terrasse
+              name: Rolladen Terrasse
+              message: >-
+                Terrassentür zu - das ausgesetzte Schließen nachgeholt.
+# queued statt restart: mit "restart" bricht jeder neue Trigger einen laufenden
+# Ablauf ab - beim alten wait_template hat das die Aussperrsicherung ausgehebelt.
+# Die Zweige sind jetzt alle kurz und ohne Warten, queued verhindert trotzdem,
+# dass sich zwei Trigger gegenseitig abschneiden.
+mode: queued
+max: 10
+max_exceeded: silent

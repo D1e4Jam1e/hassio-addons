@@ -1,6 +1,6 @@
 # Home Assistant Automationen
 
-Vier Automationen, die sich `cover.schlafzimmer` und
+Sechs Automationen, die sich `cover.schlafzimmer`, `cover.terrasse` und
 `switch.153931628878753_power` teilen:
 
 | Datei | Rolle |
@@ -9,7 +9,73 @@ Vier Automationen, die sich `cover.schlafzimmer` und
 | `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume |
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
+| `rolladen_wohnzimmer_terrasse.yaml` | Wohnzimmer + Terrasse, Gäste-/Party-Modus, Türkontakt |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
+
+## rolladen_wohnzimmer_terrasse.yaml
+
+### Die Aussperrsicherung konnte still ausfallen
+
+Jeder Schließ-Zweig wartete per `wait_template` unbegrenzt darauf, dass die
+Terrassentür zugeht. Zusammen mit `mode: restart` war das ein Loch: **jeder**
+neue Trigger bricht einen laufenden Ablauf ab — auch der Trigger „Tür geöffnet".
+
+Ein Sommerabend mit Leuten, die raus- und reingehen, sah damit so aus:
+
+1. Sonnenuntergang → Ablauf startet, Tür ist offen → wartet.
+2. Jemand geht raus → `door_open` feuert → `restart` killt den wartenden Ablauf.
+3. Die Tür geht irgendwann zu — aber es wartet niemand mehr. Der Rolladen bleibt
+   oben.
+4. 23:00 Hard-Limit → wartet ebenfalls → beim nächsten Türöffnen genauso weg.
+
+Dasselbe passierte bei einem Neustart von Home Assistant: das Warten war weg,
+und nachgeholt hat es nichts.
+
+Ersetzt durch zwei Teile ohne Warten:
+
+- **Beim Schließzeitpunkt**: Tür offen → gar nicht erst schließen, nur
+  protokollieren. Tür zu → schließen.
+- **Neuer Trigger „Tür geht zu"** holt das ausgesetzte Schließen nach, sofern
+  die Terrasse zu diesem Zeitpunkt regulär unten wäre. Unabhängig von laufenden
+  Abläufen, übersteht Neustarts.
+
+Der Nachhol-Zweig schließt nebenbei eine zweite Lücke: öffnet jemand nachts um
+02:00 die Terrassentür, fährt der Rolladen hoch — richtig, sonst sperrt man sich
+aus. Bisher blieb er dann bis zum nächsten Sonnenuntergang oben, weil 23:00
+längst vorbei war.
+
+Zeitpunkt-Logik des Nachholens (durchgespielt über Tages- und Modus-Kombinationen):
+
+| Lage | Nachholen |
+| --- | --- |
+| Normal, nach Sonnenuntergang | ja |
+| Gästemodus, ab 20:00 | ja |
+| Party aktiv, vor 23:00 | nein |
+| Party aktiv, nach 23:00 bzw. vor 07:00 | ja |
+| Tagsüber | nein |
+
+Für „ist es dunkel" wird `sun.sun` = `below_horizon` benutzt, nicht
+`condition: sun / after: sunset` — letzteres ist nach Mitternacht falsch, und
+genau dann läuft dieser Zweig.
+
+### Rolladen Terrasse bleibt oben, solange die Tür offen ist
+
+Das war schon weitgehend gebaut und ist jetzt lückenlos. Vier Wege könnten die
+Terrasse zufahren, alle sind abgedeckt:
+
+| Weg | Absicherung |
+| --- | --- |
+| Regulärer Schließzeitpunkt | prüft Tür, setzt aus |
+| 23:00 Hard-Limit | prüft Tür, setzt aus |
+| Verschattung, Zweig „Wohnzimmer + Terrasse" | `check_door: true` |
+| Verschattung, Zweig „alle 5 proaktiv" | `check_door: true` |
+
+Dazu fährt der Rolladen beim Öffnen der Tür aktiv hoch, falls er unten stand.
+
+Nicht abgedeckt — bewusst: ein **manuelles** Schließen bei offener Tür bleibt
+möglich. Eine Automation, die das zurückdreht, würde jede Handbedienung
+bekämpfen. Ebenfalls zu prüfen wäre, ob die generische „Rolladen Zeitsteuerung"
+`cover.terrasse` wirklich nicht anfasst — die liegt hier nicht vor.
 
 ## verschattung_west.yaml
 
@@ -87,7 +153,7 @@ Beides steht in *Entwicklerwerkzeuge → Zustände* beim jeweiligen `cover`:
 Positions-Bit (4).
 
 Ebenfalls prüfen: ob die Entity-IDs den Integrationswechsel überlebt haben. Alle
-fünf Automationen sprechen `cover.schlafzimmer`, `cover.kuche`, `cover.hwr`,
+Automationen sprechen `cover.schlafzimmer`, `cover.kuche`, `cover.hwr`,
 `cover.badezimmer`, `cover.wc`, `cover.wohnzimmer` und `cover.terrasse` direkt
 an — legt die neue Anbindung sie als `..._2` an, laufen die Automationen ins
 Leere, ohne einen Fehler zu werfen.
