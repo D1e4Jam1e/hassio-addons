@@ -245,11 +245,11 @@ Elektronik, Personen) über 23°C, schließt die Automation auch dann, wenn
 draußen Regen und kühle Temperaturen herrschen — das Verschatten bringt in dem
 Moment nichts, es verdunkelt den Raum nur unnötig.
 
-Neue Variable `regen_kuehl`:
+Neue Variable `regen_kuehl` (Werte unten nach Korrektur 2 aktualisiert):
 
 ```jinja
-{{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy']
-   and states('sensor.wkh_temperature_outside') | float(100) < 22 }}
+{{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy', 'cloudy', 'partlycloudy']
+   and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
 ```
 
 Solange sie zutrifft:
@@ -263,7 +263,7 @@ Solange sie zutrifft:
   Schlafzimmer bleibt bei Schichtmodus `nacht` unangetastet, bereits
   komplett geschlossene Rolladen (state `closed`) werden übersprungen.
 
-#### Korrektur: Rolladen fuhren trotz `regen_kuehl: true` nicht hoch
+#### Korrektur 1: Rolladen fuhren trotz `regen_kuehl: true` nicht hoch
 
 Im Test aufgefallen (Trace zeigte `regen_kuehl: true`, aber keine Aktion): der
 Öffnen-Zweig hatte anfangs zusätzlich zur `regen_kuehl`-Bedingung eine
@@ -279,6 +279,43 @@ Die Trigger-Einschränkung ist jetzt entfernt — `regen_kuehl` allein
 entscheidet, unabhängig davon, welcher der zwölf Trigger den Lauf ausgelöst
 hat. Der Zweig reagiert damit sofort, egal von welchem Trigger die Auswertung
 angestoßen wurde.
+
+#### Korrektur 2: `regen_kuehl` blieb trotz kühlem Wetter dauerhaft `false`
+
+Nach Korrektur 1 im Betrieb weiter beobachtet: die Nord-/Ost-Räume
+verschatteten weiterhin, obwohl es draußen den ganzen Tag nie wärmer als
+knapp 23°C wurde. Zwei Traces (15:00 und 15:10 Uhr) zeigten `regen_kuehl:
+false` — der Override griff also gar nicht erst.
+
+Ursache, per Verlaufsdaten von `weather.forecast_home` und
+`sensor.wkh_temperature_outside` nachvollzogen:
+
+- `weather.forecast_home` ist ein **Momentan-Zustand**, kein Tagesmuster. Am
+  fraglichen Tag wechselte er mehrmals stündlich: `rainy` (11:54) →
+  `partlycloudy` (12:57) → `sunny` (15:03) → ... Um 15:00/15:10 Uhr stand er
+  auf `partlycloudy` — nicht in der Liste `[rainy, pouring, lightning-rainy]`.
+- `sensor.wkh_temperature_outside` lag zur gleichen Zeit bei ca. 21–22°C,
+  also unter der alten 22°C-Schwelle. Die reine Temperaturbedingung hätte den
+  Fall also korrekt erkannt — die UND-Verknüpfung mit der volatilen
+  Wetter-Kategorie hat es verhindert.
+
+Behoben durch zwei Anpassungen an `regen_kuehl`:
+
+```jinja
+{{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy', 'cloudy', 'partlycloudy']
+   and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
+```
+
+- Zustandsliste um `cloudy`/`partlycloudy` erweitert — auch dort gibt es
+  keine nennenswerte direkte Sonne auf der Nord-/Ostseite.
+- Schwelle von 22°C auf 23°C angehoben, gleichauf mit der
+  Innentemp-Schließschwelle: der Override soll greifen, sobald es draußen
+  nicht wärmer ist, als drinnen ohnehin toleriert wird.
+
+Der Trigger `regen_kuehl_open` (State-Wechsel von `weather.forecast_home`)
+wurde um dieselben zwei Zustände erweitert, damit die Automation auch beim
+Wechsel nach `cloudy`/`partlycloudy` sofort neu auswertet, statt bis zu 10
+Minuten auf den nächsten `periodic_check` zu warten.
 
 Der proaktive „Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine
 eigene Ausnahme dafür: Außentemp > 25°C und < 22°C schließen sich gegenseitig

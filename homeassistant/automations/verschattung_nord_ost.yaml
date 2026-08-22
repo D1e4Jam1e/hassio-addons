@@ -73,8 +73,9 @@ description: >
     Temperaturen herrschen - obwohl es dort gar keine Sonne zum Blocken gibt
     und Verschatten den Raum nur unnötig verdunkelt.
     Neue Bedingung "regen_kuehl": weather.forecast_home in
-    [rainy, pouring, lightning-rainy] UND Außentemp < 22°C. Solange das
-    zutrifft:
+    [rainy, pouring, lightning-rainy, cloudy, partlycloudy] UND
+    Außentemp < 23°C (siehe Korrektur 2 unten - ursprünglich 22°C und ohne
+    cloudy/partlycloudy). Solange das zutrifft:
       - werden alle vier Schließen-Zweige blockiert (zusätzliche Bedingung
         "not regen_kuehl"),
       - fährt ein neuer, eigener Zweig alle 5 Rolladen aktiv wieder hoch -
@@ -83,9 +84,9 @@ description: >
         bereits komplett geschlossene Rolladen (state "closed"), genau wie
         die bestehenden Öffnen-Zweige.
     Der "Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine eigene
-    Ausnahme: Außentemp > 25°C und < 22°C schließen sich gegenseitig aus.
+    Ausnahme: Außentemp > 25°C und < 23°C schließen sich gegenseitig aus.
 
-    KORREKTUR (ergänzt 22.08.2026, im Test aufgefallen): der Öffnen-Zweig
+    KORREKTUR 1 (ergänzt 22.08.2026, im Test aufgefallen): der Öffnen-Zweig
     hatte anfangs zusätzlich zu "regen_kuehl" eine Trigger-Einschränkung
     (nur bei regen_kuehl_open/periodic_check). Damit blockierte z.B. ein
     Innentemp-Trigger (wz_terrasse_close bei Küchentemp > 23°C) zwar
@@ -94,6 +95,18 @@ description: >
     blieben bis zum nächsten periodic_check (bis zu 10 Min.) stehen, statt
     sofort hochzufahren. Die Trigger-Einschränkung ist jetzt entfernt:
     "regen_kuehl" allein entscheidet, unabhängig vom auslösenden Trigger.
+
+    KORREKTUR 2 (ergänzt 22.08.2026, per Trace + Verlaufsdaten
+    nachgewiesen): weather.forecast_home ist ein Momentan-Zustand, der auch
+    an einem durchgehend kühlen, wechselhaften Tag mehrmals stündlich
+    zwischen rainy/cloudy/partlycloudy/sunny wechselt - "rainy" allein traf
+    damit fast nie zu, obwohl die Außentemp den ganzen Tag nie über 23°C
+    kam. "regen_kuehl" blieb dadurch praktisch dauerhaft false, die
+    Schließen-Zweige liefen ungebremst nach reiner Innentemp. Liste um
+    cloudy/partlycloudy erweitert (auch dort gibt es keine nennenswerte
+    direkte Sonne), Schwelle von 22°C auf 23°C angehoben - gleichauf mit
+    der Innentemp-Schließschwelle, damit der Override greift, sobald es
+    draußen nicht wärmer ist als drinnen ohnehin toleriert wird.
 triggers:
   - trigger: numeric_state
     entity_id: sensor.klima_schlafzimmer_temperature
@@ -164,6 +177,8 @@ triggers:
       - rainy
       - pouring
       - lightning-rainy
+      - cloudy
+      - partlycloudy
     id: regen_kuehl_open
 conditions: []
 actions:
@@ -186,12 +201,20 @@ actions:
       # angefasst - Tagschlaf nach der Nachtschicht.
       schlafzimmer_gesperrt: >
         {{ is_state('input_select.schichtmodus_schlafzimmer', 'nacht') }}
-      # Regen + kühl draußen - dann bringt Verschatten nichts, es gibt keine
-      # Sonne zu blocken. Überstimmt die reine Innentemp-Logik, siehe
-      # description.
+      # Regen/bewölkt + kühl draußen - dann bringt Verschatten nichts, es
+      # gibt keine nennenswerte Sonne zu blocken. Überstimmt die reine
+      # Innentemp-Logik, siehe description.
+      # GEÄNDERT (22.08.2026, im Betrieb aufgefallen): weather.forecast_home
+      # ist ein Momentan-Zustand, der mehrmals stündlich zwischen
+      # rainy/cloudy/partlycloudy/sunny wechselt - "rainy" allein trifft
+      # damit einen kühlen, aber gerade nicht mehr regnenden Tag praktisch
+      # nie. Liste um cloudy/partlycloudy erweitert, Schwelle von 22°C auf
+      # 23°C angehoben (= Innentemp-Schließschwelle): der Override soll
+      # blockieren, sobald es draußen nicht wärmer ist, als drinnen ohnehin
+      # schon toleriert wird.
       regen_kuehl: >
-        {{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy']
-           and states('sensor.wkh_temperature_outside') | float(100) < 22 }}
+        {{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy', 'cloudy', 'partlycloudy']
+           and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
   - choose:
       - alias: Schlafzimmer - Schließen
         conditions:
