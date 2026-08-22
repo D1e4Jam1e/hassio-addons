@@ -6,7 +6,7 @@ Vier Automationen, die sich `cover.schlafzimmer` und
 | Datei | Rolle |
 | --- | --- |
 | `rolladen_schlafzimmer_schichterkennung.yaml` | Schichterkennung, Tagschlaf, Sonnenauf-/-untergang |
-| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume |
+| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume, mit Regen+kühl-Override |
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
@@ -170,8 +170,9 @@ nachgezogen werden. In beiden Dateien vermerkt.
 
 ## verschattung_nord_ost.yaml
 
-Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume. Hier liegt sie,
-weil sie sich mit der Schichterkennung denselben Rolladen teilt.
+Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume, seit 22.08.2026
+mit Regen+kühl-Override (siehe unten). Hier liegt sie, weil sie sich mit der
+Schichterkennung denselben Rolladen teilt.
 
 ### Koordination mit der Schichterkennung
 
@@ -228,10 +229,67 @@ Das Schlafzimmer landet damit auch im „alle 5"-Zweig auf 78 statt auf 50.
 ### `mode: queued` statt `restart`
 
 Die Drift-Korrektur wartet 20 Sekunden und prüft dann nach. Bei `restart` bricht
-jeder in dieser Zeit feuernde der elf Trigger den Lauf ab — also genau die
+jeder in dieser Zeit feuernde der zwölf Trigger den Lauf ab — also genau die
 Korrektur, die nach dem Overshoot vom 26.07. gebaut wurde. Vertretbar, weil
 Temperaturen träge sind: auf der Nordseite kommt die Sonne höchstens abends kurz
 vorbei, dicht aufeinanderfolgende Trigger sind nicht zu erwarten. `max: 5`.
+
+### Regen + kühl überstimmt die Innentemp (22.08.2026)
+
+Beobachtet: bei Regen und kühlem Wetter verschattete die Automation trotzdem,
+obwohl auf der Nord-/Ostseite gar keine Sonne zum Blocken da ist. Ursache: die
+fünf Räume hängen **ausschließlich** an ihrem Innentemp-Sensor (siehe
+Beschreibung oben — bewusst kein Helligkeits-, Außentemp- oder
+Vorhersage-Faktor). Steigt die Innentemp durch interne Wärmequellen (Kochen,
+Elektronik, Personen) über 23°C, schließt die Automation auch dann, wenn
+draußen Regen und kühle Temperaturen herrschen — das Verschatten bringt in dem
+Moment nichts, es verdunkelt den Raum nur unnötig.
+
+Neue Variable `regen_kuehl`:
+
+```jinja
+{{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy']
+   and states('sensor.wkh_temperature_outside') | float(100) < 22 }}
+```
+
+Solange sie zutrifft:
+
+- blockieren alle vier Schließen-Zweige (zusätzliche Bedingung
+  `not regen_kuehl`) — es wird nicht neu verschattet;
+- fährt ein neuer, eigener Zweig **aktiv** alle 5 Rolladen wieder hoch, auch
+  wenn die jeweilige Innentemp noch über der 21°C-Öffnen-Schwelle liegt. Das
+  ist der einzige Zweig der Automation, der Innentemp bewusst überstimmt.
+  Respektiert dabei dieselben Ausnahmen wie die bestehenden Öffnen-Zweige:
+  Schlafzimmer bleibt bei Schichtmodus `nacht` unangetastet, bereits
+  komplett geschlossene Rolladen (state `closed`) werden übersprungen.
+
+#### Korrektur: Rolladen fuhren trotz `regen_kuehl: true` nicht hoch
+
+Im Test aufgefallen (Trace zeigte `regen_kuehl: true`, aber keine Aktion): der
+Öffnen-Zweig hatte anfangs zusätzlich zur `regen_kuehl`-Bedingung eine
+Trigger-Einschränkung (`trigger.id` musste `regen_kuehl_open` oder
+`periodic_check` sein). Löste stattdessen einer der Innentemp-Trigger aus —
+z.B. `wz_terrasse_close`, weil die Küchentemperatur über 23°C stieg — blockierte
+das zwar korrekt den zugehörigen Schließen-Zweig (`not regen_kuehl`), aber der
+Öffnen-Zweig matchte wegen der Trigger-Einschränkung ebenfalls nicht. Kein
+`choose`-Zweig traf zu, die Rolladen blieben stehen, bis der nächste
+`periodic_check` (bis zu 10 Min. später) oder ein Wetter-State-Wechsel kam.
+
+Die Trigger-Einschränkung ist jetzt entfernt — `regen_kuehl` allein
+entscheidet, unabhängig davon, welcher der zwölf Trigger den Lauf ausgelöst
+hat. Der Zweig reagiert damit sofort, egal von welchem Trigger die Auswertung
+angestoßen wurde.
+
+Der proaktive „Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine
+eigene Ausnahme dafür: Außentemp > 25°C und < 22°C schließen sich gegenseitig
+aus.
+
+**Vor dem Einspielen prüfen:** `weather.forecast_home` ist die Met.no-Standard-
+Entity-ID von Home Assistant — falls eine andere Wetterintegration aktiv ist
+oder die Entity anders benannt wurde, muss die ID in der Variable `regen_kuehl`
+und im neuen Trigger `regen_kuehl_open` angepasst werden (*Entwicklerwerkzeuge
+→ Zustände* prüfen). Ebenso der Schwellwert 22°C, falls „kühl" anders definiert
+werden soll.
 
 
 ## rolladen_schlafzimmer_schichterkennung.yaml
