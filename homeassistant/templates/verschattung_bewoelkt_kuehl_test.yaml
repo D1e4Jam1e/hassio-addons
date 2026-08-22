@@ -1,0 +1,34 @@
+# Test-Sensor für den historischen Vergleich der "bewoelkt_kuehl"-Erkennung
+# aus verschattung_nord_ost.yaml (Automation) gegen die vorhandenen
+# Helligkeitssensoren (West, Süd) - bewusst NICHT in die Automation
+# eingebunden, nur zur Beobachtung über History/Logbuch.
+#
+# Bildet exakt dieselbe Formel wie die Variable "bewoelkt_kuehl" in
+# verschattung_nord_ost.yaml ab. Ändert sich dort die Entity-ID oder die
+# Schwelle, muss das hier von Hand nachgezogen werden - keine gemeinsame
+# Quelle, da Home Assistant keine automationsübergreifenden Variablen kennt
+# (siehe README, Abschnitt "Bekannte Kopplung").
+#
+# Auswertung: Entwicklerwerkzeuge -> Historie, binary_sensor.verschattung_
+# bewoelkt_kuehl_test zusammen mit den Helligkeitssensoren (West:
+# sensor.sonne_westseite_illuminance_mittelwert, Süd: analog) auswählen und
+# die An/Aus-Phasen gegen die Helligkeitskurven abgleichen. Da die
+# Helligkeitssensoren richtungsabhängig sind (Süd/West reagieren auf den
+# Sonnenstand, nicht nur auf Bewölkung), ist der Abgleich nur in den
+# Tagesstunden aussagekräftig, in denen bei klarem Himmel tatsächlich
+# direkte Sonne auf den jeweiligen Sensor treffen würde.
+#
+# Einbinden entweder als eigener Eintrag unter der "template:"-Sektion in
+# configuration.yaml (dann mit "- " vor "binary_sensor:" einrücken, falls
+# dort schon eine Liste existiert) oder über die UI: Einstellungen ->
+# Geräte & Dienste -> Hilfsbereich -> Vorlage.
+template:
+  - binary_sensor:
+      - name: "Verschattung Nord/Ost - Bewölkt+kühl (Test)"
+        unique_id: verschattung_bewoelkt_kuehl_test
+        state: >
+          {{ states('sensor.obersulm_willsbach_bewolkungsgrad') | float(0) > 50
+             and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
+        attributes:
+          bewolkungsgrad: "{{ states('sensor.obersulm_willsbach_bewolkungsgrad') }}"
+          aussentemp: "{{ states('sensor.wkh_temperature_outside') }}"

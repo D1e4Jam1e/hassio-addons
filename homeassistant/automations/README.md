@@ -346,6 +346,14 @@ Entity-ID in der Variable `bewoelkt_kuehl` und im Trigger
 `bewoelkt_kuehl_open` angepasst werden (*Entwicklerwerkzeuge → Zustände*
 prüfen).
 
+**Kalibrierung der 50%-Schwelle:** wie gut die DWD-Stationsmessung die
+tatsächlichen Lichtverhältnisse am Haus trifft, ist bisher nur an einem
+einzelnen Live-Abgleich (53% ≈ „ziemlich zu") festgemacht. Für einen
+belastbareren Abgleich über mehrere Tage gegen die vorhandenen
+Helligkeitssensoren (West, Süd) siehe
+`../templates/verschattung_bewoelkt_kuehl_test.yaml` — ein eigenständiger
+Test-Sensor, bewusst nicht in diese Automation eingebunden.
+
 
 ## rolladen_schlafzimmer_schichterkennung.yaml
 
