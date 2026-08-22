@@ -40,6 +40,25 @@ description: >
       dadurch vervielfacht (das war vermutlich der Hauptverstärker des
       Vorfalls vom 26.07.).
 
+  TERRASSE - AUSSPERRSCHUTZ (ergänzt):
+    cover.terrasse wird beim Schließen übersprungen, solange die
+    Terrassentür offen ist ODER input_boolean.party_terrasse an ist.
+    Beobachtet wurde, dass der Rolladen bei offener Tür in
+    Verschattungsposition fuhr - man sitzt draußen und steht vor einem
+    heruntergefahrenen Rolladen. Der Türkontakt ist nicht invertiert,
+    überträgt seinen Status aber nicht immer; verpasst er das Öffnen,
+    hielt Home Assistant die Tür für zu und der Guard gab frei.
+    Zwei Konsequenzen daraus:
+      - Der Türkontakt zählt nur noch dann als "zu", wenn er das
+        ausdrücklich meldet. "unknown", "unavailable" und ein verpasstes
+        Update gelten als offen.
+      - Der Party-Schalter sperrt die Terrasse zusätzlich, unabhängig vom
+        Sensor. Das ist die einzige Absicherung, die nicht an dessen
+        Zuverlässigkeit hängt - bei längerem Aufenthalt draußen also der
+        verlässliche Weg.
+    Betrifft beide Zweige, die die Terrasse schließen (der eigene und
+    "alle 5 proaktiv"). Das Wohnzimmer ist NICHT betroffen.
+
   Absicherung gegen "Aufwecken" nachts komplett geschlossener Rolladen: auch die
   Schließen- UND Öffnen-Zweige überspringen Rolladen, die bereits state "closed"
   (Position 0) sind - das greift weiterhin für echte nächtliche Vollschließung
@@ -179,6 +198,21 @@ actions:
         cover.wc: 50
         cover.wohnzimmer: 50
         cover.terrasse: 50
+      # Der Türkontakt überträgt seinen Status nicht immer zuverlässig.
+      # Deshalb gilt die Tür NUR dann als zu, wenn er das ausdrücklich meldet -
+      # "unknown", "unavailable" oder ein verpasstes Update zählen als offen.
+      # Fehlerrichtung: im Zweifel nicht verschatten. Das kostet nur etwas
+      # Wärme, während die Gegenrichtung heißt, dass jemand vor einem
+      # heruntergefahrenen Rolladen auf der Terrasse steht.
+      tuer_offen: >-
+        {{ not is_state('binary_sensor.terrassenturkontakt_contact', 'off') }}
+      # Zweiter, manueller Riegel: solange der Party-Schalter an ist, wird die
+      # Terrasse gar nicht angefasst - unabhängig davon, was der Türkontakt
+      # gerade meldet oder ob er die letzte Änderung übertragen hat. Das ist
+      # die einzige Absicherung, die nicht an der Zuverlässigkeit des Sensors
+      # hängt.
+      terrasse_gesperrt: >-
+        {{ tuer_offen or is_state('input_boolean.party_terrasse', 'on') }}
       # Wie weit darf die tatsächliche Position unter der Zielposition liegen,
       # bevor nachkorrigiert wird.
       drift_toleranz: 5
@@ -490,9 +524,7 @@ actions:
                 - if:
                     - condition: template
                       value_template: >
-                        {{ (not repeat.item.check_door or
-                        is_state('binary_sensor.terrassenturkontakt_contact',
-                        'off'))
+                        {{ (not repeat.item.check_door or not terrasse_gesperrt)
                            and not is_state(repeat.item.cover, 'closed')
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
                                  or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - positionen[repeat.item.cover]) | abs > 5) ) }}
@@ -626,9 +658,7 @@ actions:
                 - if:
                     - condition: template
                       value_template: >
-                        {{ (not repeat.item.check_door or
-                        is_state('binary_sensor.terrassenturkontakt_contact',
-                        'off'))
+                        {{ (not repeat.item.check_door or not terrasse_gesperrt)
                            and not is_state(repeat.item.cover, 'closed')
                            and not (repeat.item.cover == 'cover.schlafzimmer' and schlafzimmer_gesperrt)
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
