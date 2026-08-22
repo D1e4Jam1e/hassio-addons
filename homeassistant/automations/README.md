@@ -263,6 +263,23 @@ Solange sie zutrifft:
   Schlafzimmer bleibt bei Schichtmodus `nacht` unangetastet, bereits
   komplett geschlossene Rolladen (state `closed`) werden übersprungen.
 
+#### Korrektur: Rolladen fuhren trotz `regen_kuehl: true` nicht hoch
+
+Im Test aufgefallen (Trace zeigte `regen_kuehl: true`, aber keine Aktion): der
+Öffnen-Zweig hatte anfangs zusätzlich zur `regen_kuehl`-Bedingung eine
+Trigger-Einschränkung (`trigger.id` musste `regen_kuehl_open` oder
+`periodic_check` sein). Löste stattdessen einer der Innentemp-Trigger aus —
+z.B. `wz_terrasse_close`, weil die Küchentemperatur über 23°C stieg — blockierte
+das zwar korrekt den zugehörigen Schließen-Zweig (`not regen_kuehl`), aber der
+Öffnen-Zweig matchte wegen der Trigger-Einschränkung ebenfalls nicht. Kein
+`choose`-Zweig traf zu, die Rolladen blieben stehen, bis der nächste
+`periodic_check` (bis zu 10 Min. später) oder ein Wetter-State-Wechsel kam.
+
+Die Trigger-Einschränkung ist jetzt entfernt — `regen_kuehl` allein
+entscheidet, unabhängig davon, welcher der zwölf Trigger den Lauf ausgelöst
+hat. Der Zweig reagiert damit sofort, egal von welchem Trigger die Auswertung
+angestoßen wurde.
+
 Der proaktive „Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine
 eigene Ausnahme dafür: Außentemp > 25°C und < 22°C schließen sich gegenseitig
 aus.

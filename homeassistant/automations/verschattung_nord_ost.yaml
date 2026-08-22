@@ -84,6 +84,16 @@ description: >
         die bestehenden Öffnen-Zweige.
     Der "Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine eigene
     Ausnahme: Außentemp > 25°C und < 22°C schließen sich gegenseitig aus.
+
+    KORREKTUR (ergänzt 22.08.2026, im Test aufgefallen): der Öffnen-Zweig
+    hatte anfangs zusätzlich zu "regen_kuehl" eine Trigger-Einschränkung
+    (nur bei regen_kuehl_open/periodic_check). Damit blockierte z.B. ein
+    Innentemp-Trigger (wz_terrasse_close bei Küchentemp > 23°C) zwar
+    korrekt den zugehörigen Schließen-Zweig, matchte aber auch den
+    Öffnen-Zweig nicht mehr - kein choose-Zweig traf zu, die Rolladen
+    blieben bis zum nächsten periodic_check (bis zu 10 Min.) stehen, statt
+    sofort hochzufahren. Die Trigger-Einschränkung ist jetzt entfernt:
+    "regen_kuehl" allein entscheidet, unabhängig vom auslösenden Trigger.
 triggers:
   - trigger: numeric_state
     entity_id: sensor.klima_schlafzimmer_temperature
@@ -549,14 +559,17 @@ actions:
                         entity_id: "{{ repeat.item }}"
       - alias: Regen + kühl - alle 5 aktiv öffnen (überstimmt Innentemp)
         conditions:
+          # Bewusst OHNE Trigger-Einschränkung: regen_kuehl allein
+          # entscheidet, unabhängig davon, welcher der zwölf Trigger den
+          # Lauf ausgelöst hat. Mit einer Einschränkung auf
+          # regen_kuehl_open/periodic_check würde z.B. ein
+          # Innentemp-Trigger (etwa wz_terrasse_close) zwar den passenden
+          # Schließen-Zweig korrekt blockieren (not regen_kuehl), aber
+          # keinen Zweig mehr matchen lassen - die Rolladen blieben dann
+          # bis zu 10 Minuten (nächster periodic_check) unangetastet statt
+          # sofort hochzufahren.
           - condition: template
             value_template: "{{ regen_kuehl }}"
-          - condition: or
-            conditions:
-              - condition: trigger
-                id: regen_kuehl_open
-              - condition: trigger
-                id: periodic_check
         sequence:
           - repeat:
               for_each:
