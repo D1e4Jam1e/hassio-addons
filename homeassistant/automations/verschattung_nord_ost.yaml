@@ -1,4 +1,4 @@
-alias: Verschattung Nord/Ost (rein temperaturbasiert)
+alias: Verschattung Nord/Ost (temperaturbasiert, Regen+kühl-Override)
 description: >
   Sonnenschutz für die Räume ohne Helligkeitssensor (Nord-/Ostseite, keine
   direkte Wärmestrahlung, daher reicht Temperatur allein):
@@ -65,6 +65,25 @@ description: >
     selben Moment wieder zuständig und zieht ihn auf Verschattungsposition -
     was auch die Klimaanlage entsperrt, die bei geschlossenem Rolladen
     blockiert ist.
+
+  REGEN + KÜHL ÜBERSTIMMT DIE INNENTEMP (ergänzt 22.08.2026):
+    Die reine Innentemp-Logik oben hatte eine Lücke: steigt die Innentemp
+    durch interne Wärmequellen (Kochen, Elektronik, Personen) über 23°C,
+    verschattet diese Automation auch dann, wenn draußen Regen und kühle
+    Temperaturen herrschen - obwohl es dort gar keine Sonne zum Blocken gibt
+    und Verschatten den Raum nur unnötig verdunkelt.
+    Neue Bedingung "regen_kuehl": weather.forecast_home in
+    [rainy, pouring, lightning-rainy] UND Außentemp < 22°C. Solange das
+    zutrifft:
+      - werden alle vier Schließen-Zweige blockiert (zusätzliche Bedingung
+        "not regen_kuehl"),
+      - fährt ein neuer, eigener Zweig alle 5 Rolladen aktiv wieder hoch -
+        auch wenn die jeweilige Innentemp noch über 21°C liegt. Er respektiert
+        weiterhin den Schichtmodus-Schutz fürs Schlafzimmer und überspringt
+        bereits komplett geschlossene Rolladen (state "closed"), genau wie
+        die bestehenden Öffnen-Zweige.
+    Der "Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine eigene
+    Ausnahme: Außentemp > 25°C und < 22°C schließen sich gegenseitig aus.
 triggers:
   - trigger: numeric_state
     entity_id: sensor.klima_schlafzimmer_temperature
@@ -129,6 +148,13 @@ triggers:
   - trigger: time_pattern
     minutes: /10
     id: periodic_check
+  - trigger: state
+    entity_id: weather.forecast_home
+    to:
+      - rainy
+      - pouring
+      - lightning-rainy
+    id: regen_kuehl_open
 conditions: []
 actions:
   - variables:
@@ -150,6 +176,12 @@ actions:
       # angefasst - Tagschlaf nach der Nachtschicht.
       schlafzimmer_gesperrt: >
         {{ is_state('input_select.schichtmodus_schlafzimmer', 'nacht') }}
+      # Regen + kühl draußen - dann bringt Verschatten nichts, es gibt keine
+      # Sonne zu blocken. Überstimmt die reine Innentemp-Logik, siehe
+      # description.
+      regen_kuehl: >
+        {{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy']
+           and states('sensor.wkh_temperature_outside') | float(100) < 22 }}
   - choose:
       - alias: Schlafzimmer - Schließen
         conditions:
@@ -167,6 +199,10 @@ actions:
           # Schichtmodus hat Vorrang - siehe description.
           - condition: template
             value_template: "{{ not schlafzimmer_gesperrt }}"
+          # Regen + kühl draußen - dann bringt Verschatten nichts, siehe
+          # description.
+          - condition: template
+            value_template: "{{ not regen_kuehl }}"
           - condition: not
             conditions:
               - condition: state
@@ -255,6 +291,10 @@ actions:
                   - condition: numeric_state
                     entity_id: sensor.klima_bad_temperature
                     above: 23
+          # Regen + kühl draußen - dann bringt Verschatten nichts, siehe
+          # description.
+          - condition: template
+            value_template: "{{ not regen_kuehl }}"
           - condition: not
             conditions:
               - condition: state
@@ -338,6 +378,10 @@ actions:
                   - condition: numeric_state
                     entity_id: sensor.klima_wc_temperature
                     above: 23
+          # Regen + kühl draußen - dann bringt Verschatten nichts, siehe
+          # description.
+          - condition: template
+            value_template: "{{ not regen_kuehl }}"
           - condition: not
             conditions:
               - condition: state
@@ -421,6 +465,10 @@ actions:
                   - condition: numeric_state
                     entity_id: sensor.klima_kuche_temperature
                     above: 23
+          # Regen + kühl draußen - dann bringt Verschatten nichts, siehe
+          # description.
+          - condition: template
+            value_template: "{{ not regen_kuehl }}"
         sequence:
           - repeat:
               for_each:
@@ -499,6 +547,39 @@ actions:
                     - action: cover.open_cover
                       target:
                         entity_id: "{{ repeat.item }}"
+      - alias: Regen + kühl - alle 5 aktiv öffnen (überstimmt Innentemp)
+        conditions:
+          - condition: template
+            value_template: "{{ regen_kuehl }}"
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: regen_kuehl_open
+              - condition: trigger
+                id: periodic_check
+        sequence:
+          - repeat:
+              for_each:
+                - cover: cover.schlafzimmer
+                  respect_schlafzimmer_lock: true
+                - cover: cover.badezimmer
+                  respect_schlafzimmer_lock: false
+                - cover: cover.wc
+                  respect_schlafzimmer_lock: false
+                - cover: cover.wohnzimmer
+                  respect_schlafzimmer_lock: false
+                - cover: cover.terrasse
+                  respect_schlafzimmer_lock: false
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ not is_state(repeat.item.cover, 'closed')
+                           and not (repeat.item.respect_schlafzimmer_lock and schlafzimmer_gesperrt) }}
+                  then:
+                    - action: cover.open_cover
+                      target:
+                        entity_id: "{{ repeat.item.cover }}"
       - alias: Außentemp > 25°C UND Vorhersage > 25°C - alle 5 proaktiv schließen
         conditions:
           - condition: or
@@ -607,7 +688,7 @@ actions:
                       target:
                         entity_id: "{{ repeat.item }}"
 # queued statt restart: die Drift-Korrektur wartet 20 Sekunden und prüft dann
-# nach. Bei "restart" bricht jeder in dieser Zeit feuernde der elf Trigger den
+# nach. Bei "restart" bricht jeder in dieser Zeit feuernde der zwölf Trigger den
 # Lauf ab - also genau die Korrektur, die gegen den Overshoot vom 26.07. gebaut
 # wurde. Vertretbar, weil Temperaturen träge sind: auf der Nordseite kommt die
 # Sonne höchstens abends kurz vorbei, dicht aufeinanderfolgende Trigger sind
