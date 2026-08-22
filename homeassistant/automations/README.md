@@ -6,7 +6,7 @@ Vier Automationen, die sich `cover.schlafzimmer` und
 | Datei | Rolle |
 | --- | --- |
 | `rolladen_schlafzimmer_schichterkennung.yaml` | Schichterkennung, Tagschlaf, Sonnenauf-/-untergang |
-| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume, mit Regen+kühl-Override |
+| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume, mit Bewölkt+kühl-Override |
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
@@ -171,7 +171,7 @@ nachgezogen werden. In beiden Dateien vermerkt.
 ## verschattung_nord_ost.yaml
 
 Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume, seit 22.08.2026
-mit Regen+kühl-Override (siehe unten). Hier liegt sie, weil sie sich mit der
+mit Bewölkt+kühl-Override (siehe unten). Hier liegt sie, weil sie sich mit der
 Schichterkennung denselben Rolladen teilt.
 
 ### Koordination mit der Schichterkennung
@@ -234,7 +234,7 @@ Korrektur, die nach dem Overshoot vom 26.07. gebaut wurde. Vertretbar, weil
 Temperaturen träge sind: auf der Nordseite kommt die Sonne höchstens abends kurz
 vorbei, dicht aufeinanderfolgende Trigger sind nicht zu erwarten. `max: 5`.
 
-### Regen + kühl überstimmt die Innentemp (22.08.2026)
+### Bewölkt + kühl überstimmt die Innentemp (22.08.2026)
 
 Beobachtet: bei Regen und kühlem Wetter verschattete die Automation trotzdem,
 obwohl auf der Nord-/Ostseite gar keine Sonne zum Blocken da ist. Ursache: die
@@ -242,20 +242,20 @@ fünf Räume hängen **ausschließlich** an ihrem Innentemp-Sensor (siehe
 Beschreibung oben — bewusst kein Helligkeits-, Außentemp- oder
 Vorhersage-Faktor). Steigt die Innentemp durch interne Wärmequellen (Kochen,
 Elektronik, Personen) über 23°C, schließt die Automation auch dann, wenn
-draußen Regen und kühle Temperaturen herrschen — das Verschatten bringt in dem
+draußen keine nennenswerte Sonne durchkommt — das Verschatten bringt in dem
 Moment nichts, es verdunkelt den Raum nur unnötig.
 
-Neue Variable `regen_kuehl` (Werte unten nach Korrektur 2 aktualisiert):
+Variable `bewoelkt_kuehl` (finaler Stand nach drei Korrekturen, siehe unten):
 
 ```jinja
-{{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy', 'cloudy', 'partlycloudy']
+{{ states('sensor.obersulm_willsbach_bewolkungsgrad') | float(0) > 50
    and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
 ```
 
 Solange sie zutrifft:
 
 - blockieren alle vier Schließen-Zweige (zusätzliche Bedingung
-  `not regen_kuehl`) — es wird nicht neu verschattet;
+  `not bewoelkt_kuehl`) — es wird nicht neu verschattet;
 - fährt ein neuer, eigener Zweig **aktiv** alle 5 Rolladen wieder hoch, auch
   wenn die jeweilige Innentemp noch über der 21°C-Öffnen-Schwelle liegt. Das
   ist der einzige Zweig der Automation, der Innentemp bewusst überstimmt.
@@ -263,29 +263,35 @@ Solange sie zutrifft:
   Schlafzimmer bleibt bei Schichtmodus `nacht` unangetastet, bereits
   komplett geschlossene Rolladen (state `closed`) werden übersprungen.
 
-#### Korrektur 1: Rolladen fuhren trotz `regen_kuehl: true` nicht hoch
+Der proaktive „Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine
+eigene Ausnahme dafür: Außentemp > 25°C und < 23°C schließen sich gegenseitig
+aus.
 
-Im Test aufgefallen (Trace zeigte `regen_kuehl: true`, aber keine Aktion): der
-Öffnen-Zweig hatte anfangs zusätzlich zur `regen_kuehl`-Bedingung eine
-Trigger-Einschränkung (`trigger.id` musste `regen_kuehl_open` oder
-`periodic_check` sein). Löste stattdessen einer der Innentemp-Trigger aus —
-z.B. `wz_terrasse_close`, weil die Küchentemperatur über 23°C stieg — blockierte
-das zwar korrekt den zugehörigen Schließen-Zweig (`not regen_kuehl`), aber der
-Öffnen-Zweig matchte wegen der Trigger-Einschränkung ebenfalls nicht. Kein
-`choose`-Zweig traf zu, die Rolladen blieben stehen, bis der nächste
-`periodic_check` (bis zu 10 Min. später) oder ein Wetter-State-Wechsel kam.
+#### Korrektur 1: Rolladen fuhren trotz erfüllter Override-Bedingung nicht hoch
 
-Die Trigger-Einschränkung ist jetzt entfernt — `regen_kuehl` allein
+Im Test aufgefallen (Trace zeigte die Override-Variable als `true`, aber
+keine Aktion): der Öffnen-Zweig hatte anfangs zusätzlich eine
+Trigger-Einschränkung (`trigger.id` musste einem bestimmten Trigger
+entsprechen). Löste stattdessen einer der Innentemp-Trigger aus — z.B.
+`wz_terrasse_close`, weil die Küchentemperatur über 23°C stieg — blockierte
+das zwar korrekt den zugehörigen Schließen-Zweig, aber der Öffnen-Zweig
+matchte wegen der Trigger-Einschränkung ebenfalls nicht. Kein `choose`-Zweig
+traf zu, die Rolladen blieben stehen, bis der nächste `periodic_check` (bis
+zu 10 Min. später) kam.
+
+Die Trigger-Einschränkung ist jetzt entfernt — die Override-Variable allein
 entscheidet, unabhängig davon, welcher der zwölf Trigger den Lauf ausgelöst
 hat. Der Zweig reagiert damit sofort, egal von welchem Trigger die Auswertung
 angestoßen wurde.
 
-#### Korrektur 2: `regen_kuehl` blieb trotz kühlem Wetter dauerhaft `false`
+#### Korrektur 2: `weather.forecast_home` war als Kriterium ungeeignet
 
-Nach Korrektur 1 im Betrieb weiter beobachtet: die Nord-/Ost-Räume
+Ursprünglich stand hier eine Bedingung auf `weather.forecast_home` (Met.no):
+`in [rainy, pouring, lightning-rainy]`, später erweitert um `cloudy`/
+`partlycloudy`. Im Betrieb weiter beobachtet: die Nord-/Ost-Räume
 verschatteten weiterhin, obwohl es draußen den ganzen Tag nie wärmer als
-knapp 23°C wurde. Zwei Traces (15:00 und 15:10 Uhr) zeigten `regen_kuehl:
-false` — der Override griff also gar nicht erst.
+knapp 23°C wurde. Zwei Traces (15:00 und 15:10 Uhr) zeigten die
+Override-Variable als `false` — der Override griff also gar nicht erst.
 
 Ursache, per Verlaufsdaten von `weather.forecast_home` und
 `sensor.wkh_temperature_outside` nachvollzogen:
@@ -293,40 +299,52 @@ Ursache, per Verlaufsdaten von `weather.forecast_home` und
 - `weather.forecast_home` ist ein **Momentan-Zustand**, kein Tagesmuster. Am
   fraglichen Tag wechselte er mehrmals stündlich: `rainy` (11:54) →
   `partlycloudy` (12:57) → `sunny` (15:03) → ... Um 15:00/15:10 Uhr stand er
-  auf `partlycloudy` — nicht in der Liste `[rainy, pouring, lightning-rainy]`.
+  auf `partlycloudy` — nicht in der ursprünglichen Zustandsliste.
 - `sensor.wkh_temperature_outside` lag zur gleichen Zeit bei ca. 21–22°C,
-  also unter der alten 22°C-Schwelle. Die reine Temperaturbedingung hätte den
+  also unter der Temperaturschwelle. Die reine Temperaturbedingung hätte den
   Fall also korrekt erkannt — die UND-Verknüpfung mit der volatilen
   Wetter-Kategorie hat es verhindert.
 
-Behoben durch zwei Anpassungen an `regen_kuehl`:
+Kurz danach zusätzlich beobachtet: `weather.forecast_home` zeigte `sunny`,
+während es tatsächlich bewölkt war — der Zustand ist offenbar modellbasiert
+(Vorhersage fürs aktuelle Stündchen), keine echte Beobachtung, und kann daran
+vorbeiliegen.
 
-```jinja
-{{ states('weather.forecast_home') in ['rainy', 'pouring', 'lightning-rainy', 'cloudy', 'partlycloudy']
-   and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
-```
+#### Korrektur 3: Umstieg auf DWD-Bewölkungsgrad (numerisch statt Kategorie)
 
-- Zustandsliste um `cloudy`/`partlycloudy` erweitert — auch dort gibt es
-  keine nennenswerte direkte Sonne auf der Nord-/Ostseite.
-- Schwelle von 22°C auf 23°C angehoben, gleichauf mit der
-  Innentemp-Schließschwelle: der Override soll greifen, sobald es draußen
-  nicht wärmer ist, als drinnen ohnehin toleriert wird.
+`weather.forecast_home` komplett ersetzt durch
+`sensor.obersulm_willsbach_bewolkungsgrad` — eine DWD-Stationsmessung
+(Deutscher Wetterdienst, HACS-Integration
+[FL550/dwd_weather](https://github.com/FL550/dwd_weather)) statt einer
+Modell-Zustandskategorie. Ein numerischer Prozentwert lässt sich nicht in
+eine falsche Kategorie einsortieren und ist nicht auf eine feste Werteliste
+angewiesen — deckt automatisch auch andere Fälle als „Regen" ab, z.B. dichte,
+aber trockene Bewölkung.
 
-Der Trigger `regen_kuehl_open` (State-Wechsel von `weather.forecast_home`)
-wurde um dieselben zwei Zustände erweitert, damit die Automation auch beim
-Wechsel nach `cloudy`/`partlycloudy` sofort neu auswertet, statt bis zu 10
-Minuten auf den nächsten `periodic_check` zu warten.
+Schwelle zunächst mit 75% angesetzt, angelehnt an die grobe meteorologische
+Einteilung „stark bewölkt bis bedeckt" (6–8 Achtel). Noch am selben Tag per
+Live-Abgleich korrigiert: bei einem abgelesenen Wert von 53% wurde der Himmel
+bereits als „ziemlich zu" beschrieben — 75% wäre also viel zu träge gewesen
+und hätte den ursprünglichen Fall kaum noch abgedeckt. Endgültige Schwelle:
+**50%**.
 
-Der proaktive „Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine
-eigene Ausnahme dafür: Außentemp > 25°C und < 22°C schließen sich gegenseitig
-aus.
+Trigger `bewoelkt_kuehl_open` entsprechend von einem `state`-Trigger auf
+`weather.forecast_home` zu einem `numeric_state`-Trigger auf
+`sensor.obersulm_willsbach_bewolkungsgrad` (`above: 50`) geändert, damit die
+Automation beim Überschreiten der Schwelle sofort neu auswertet statt bis zu
+10 Minuten auf den nächsten `periodic_check` zu warten.
 
-**Vor dem Einspielen prüfen:** `weather.forecast_home` ist die Met.no-Standard-
-Entity-ID von Home Assistant — falls eine andere Wetterintegration aktiv ist
-oder die Entity anders benannt wurde, muss die ID in der Variable `regen_kuehl`
-und im neuen Trigger `regen_kuehl_open` angepasst werden (*Entwicklerwerkzeuge
-→ Zustände* prüfen). Ebenso der Schwellwert 22°C, falls „kühl" anders definiert
-werden soll.
+Variable und Trigger von `regen_kuehl`/`regen_kuehl_open` in
+`bewoelkt_kuehl`/`bewoelkt_kuehl_open` umbenannt — „Regen" war nie das
+eigentliche Kriterium, sondern fehlende direkte Sonne.
+
+**Falls die Station wechselt oder die Integration neu eingerichtet wird:**
+`sensor.obersulm_willsbach_bewolkungsgrad` ist stations- bzw.
+konfigurationsspezifisch benannt (Station „Obersulm-Willsbach", Q242) — bei
+einer anderen DWD-Station oder einer neu aufgesetzten Integration muss die
+Entity-ID in der Variable `bewoelkt_kuehl` und im Trigger
+`bewoelkt_kuehl_open` angepasst werden (*Entwicklerwerkzeuge → Zustände*
+prüfen).
 
 
 ## rolladen_schlafzimmer_schichterkennung.yaml
