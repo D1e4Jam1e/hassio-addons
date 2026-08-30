@@ -28,6 +28,16 @@ Automation auslösen. Die beiden Trigger tragen deshalb IDs (`an`/`aus`), und
 ein `choose` wählt anhand der Trigger-ID zwischen `light.turn_on` und
 `light.turn_off`.
 
+### light.kugeln nur bei Dunkelheit
+
+Beim Einschalten bekommt `light.kugeln` zusätzlich den Effekt "TV time" -
+aber nur, wenn die Sonne unter dem Horizont steht (`sun.elevation below 0`),
+sonst wird es explizit ausgeschaltet. Geprüft wird nur im Moment des
+Einschaltens: läuft der Apple TV bereits und die Tageszeit wechselt
+währenddessen (z.B. Einschalten am Nachmittag, Dunkelheit erst Stunden
+später), reagiert `light.kugeln` nicht nach - dafür fehlt ein eigener
+Trigger auf den Sonnenstand.
+
 ## verschattung_west.yaml
 
 ### „HWR fährt zu weit zu" — die Korrektur konnte den Fall nicht sehen

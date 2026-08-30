@@ -8,6 +8,13 @@ description: >
   Unterscheidung per Trigger-ID im "choose": ohne die Zuordnung würde beim
   Ausschalt-Trigger dieselbe "light.turn_on"-Aktion laufen wie beim
   Einschalten, weil beide Trigger dieselbe Automation auslösen.
+
+  Zusätzlich: light.kugeln bekommt beim Einschalten den Effekt "TV time",
+  aber nur wenn es dunkel ist (Sonne unter dem Horizont) - tagsüber bringt
+  der Effekt nichts und würde nur unnötig Licht dazuschalten. Wird nur beim
+  Einschalt-Zeitpunkt geprüft, nicht laufend: wechselt die Tageszeit,
+  während der Apple TV bereits läuft, reagiert light.kugeln nicht nach, da
+  kein Trigger auf den Sonnenstand existiert.
 triggers:
   - trigger: media_player.turned_on
     target:
@@ -35,6 +42,24 @@ actions:
               entity_id:
                 - light.wohnzimmer_schrank_links_haupt
                 - light.wohnzimmer_schrank_rechts_haupt
+          - if:
+              - condition: sun.elevation
+                options:
+                  threshold:
+                    type: below
+                    value:
+                      active_choice: number
+                      number: 0
+            then:
+              - action: light.turn_on
+                target:
+                  entity_id: light.kugeln
+                data:
+                  effect: TV time
+            else:
+              - action: light.turn_off
+                target:
+                  entity_id: light.kugeln
       - conditions:
           - condition: trigger
             id: aus
@@ -44,4 +69,7 @@ actions:
               entity_id:
                 - light.wohnzimmer_schrank_links_haupt
                 - light.wohnzimmer_schrank_rechts_haupt
+          - action: light.turn_off
+            target:
+              entity_id: light.kugeln
 mode: single
