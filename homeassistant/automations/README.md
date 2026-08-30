@@ -1,7 +1,8 @@
 # Home Assistant Automationen
 
-Vier Automationen, die sich `cover.schlafzimmer` und
-`switch.153931628878753_power` teilen:
+Fünf Automationen, die sich `cover.schlafzimmer` und
+`switch.153931628878753_power` teilen, plus eine unabhängige
+Wohnzimmer-Automation:
 
 | Datei | Rolle |
 | --- | --- |
@@ -10,6 +11,22 @@ Vier Automationen, die sich `cover.schlafzimmer` und
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
+| `schrankbeleuchtung.yaml` | Schrankbeleuchtung Wohnzimmer, gekoppelt an Apple TV |
+
+## schrankbeleuchtung.yaml
+
+Schaltet die beiden Schrank-Lichter im Wohnzimmer mit
+`media_player.wohnzimmer_apple_tv_wohnzimmer` ein und wieder aus. Beide
+Richtungen in einer Automation statt in getrennten Ein-/Aus-Dateien (wie bei
+der Klimaanlage), weil sich Media Player und Lichter zwischen beiden Zweigen
+nicht unterscheiden - eine zweite Datei hätte nur dieselben Entity-IDs
+dupliziert.
+
+Ein `media_player.turned_off`-Trigger allein hätte die vorhandene
+`light.turn_on`-Aktion erneut ausgelöst, da beide Trigger dieselbe
+Automation auslösen. Die beiden Trigger tragen deshalb IDs (`an`/`aus`), und
+ein `choose` wählt anhand der Trigger-ID zwischen `light.turn_on` und
+`light.turn_off`.
 
 ## verschattung_west.yaml
 

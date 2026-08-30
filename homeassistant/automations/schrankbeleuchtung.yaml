@@ -1,0 +1,47 @@
+alias: Schrankbeleuchtung
+description: >
+  Schrankbeleuchtung im Wohnzimmer gekoppelt an den Apple TV: geht mit dem
+  Gerät an und wieder aus. Beide Richtungen in einer Automation, weil sie
+  denselben Media Player und dieselben zwei Lichter teilen - eine zweite
+  Datei hätte nur Zielposition/Entity-ID dupliziert.
+
+  Unterscheidung per Trigger-ID im "choose": ohne die Zuordnung würde beim
+  Ausschalt-Trigger dieselbe "light.turn_on"-Aktion laufen wie beim
+  Einschalten, weil beide Trigger dieselbe Automation auslösen.
+triggers:
+  - trigger: media_player.turned_on
+    target:
+      entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+    options:
+      behavior: each
+      for: '00:00:00'
+    id: an
+  - trigger: media_player.turned_off
+    target:
+      entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+    options:
+      behavior: each
+      for: '00:00:00'
+    id: aus
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: an
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.wohnzimmer_schrank_links_haupt
+                - light.wohnzimmer_schrank_rechts_haupt
+      - conditions:
+          - condition: trigger
+            id: aus
+        sequence:
+          - action: light.turn_off
+            target:
+              entity_id:
+                - light.wohnzimmer_schrank_links_haupt
+                - light.wohnzimmer_schrank_rechts_haupt
+mode: single
