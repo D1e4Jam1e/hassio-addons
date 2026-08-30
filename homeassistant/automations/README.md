@@ -32,11 +32,20 @@ ein `choose` wählt anhand der Trigger-ID zwischen `light.turn_on` und
 
 Beim Einschalten bekommt `light.kugeln` zusätzlich den Effekt "TV time" -
 aber nur, wenn die Sonne unter dem Horizont steht (`sun.elevation below 0`),
-sonst wird es explizit ausgeschaltet. Geprüft wird nur im Moment des
-Einschaltens: läuft der Apple TV bereits und die Tageszeit wechselt
-währenddessen (z.B. Einschalten am Nachmittag, Dunkelheit erst Stunden
-später), reagiert `light.kugeln` nicht nach - dafür fehlt ein eigener
-Trigger auf den Sonnenstand.
+sonst wird es explizit ausgeschaltet.
+
+Damit das auch nachreagiert, wenn der Apple TV schon läuft und sich
+währenddessen die Tageszeit ändert, gibt es zwei weitere Trigger
+(`dunkel`/`hell`) auf `sun.sun`, Attribut `elevation`, jeweils mit
+Schwelle 0. Beide sind zusätzlich an die Bedingung "Apple TV ist gerade an"
+(`state` von `media_player.wohnzimmer_apple_tv_wohnzimmer` ist nicht `off`)
+gebunden - sonst würde bei jedem Sonnenauf-/-untergang `light.kugeln`
+angefasst, auch wenn gar nicht ferngesehen wird.
+
+`numeric_state` statt eines purpose-specific Triggers, weil eine
+Elevation-Schwelle von exakt 0° kein benannter Standardfall ist (siehe
+Diskussion zu bürgerlicher/nautischer/astronomischer Dämmerung oben) -
+dafür gibt's keine fertige Abkürzung, nur die generische Ebene.
 
 ## verschattung_west.yaml
 

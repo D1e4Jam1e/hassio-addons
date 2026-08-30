@@ -11,10 +11,13 @@ description: >
 
   Zusätzlich: light.kugeln bekommt beim Einschalten den Effekt "TV time",
   aber nur wenn es dunkel ist (Sonne unter dem Horizont) - tagsüber bringt
-  der Effekt nichts und würde nur unnötig Licht dazuschalten. Wird nur beim
-  Einschalt-Zeitpunkt geprüft, nicht laufend: wechselt die Tageszeit,
-  während der Apple TV bereits läuft, reagiert light.kugeln nicht nach, da
-  kein Trigger auf den Sonnenstand existiert.
+  der Effekt nichts und würde nur unnötig Licht dazuschalten.
+
+  Zwei weitere Trigger (dunkel/hell) fangen den Fall ab, dass sich die
+  Tageszeit ändert, während der Apple TV schon läuft - sonst würde
+  light.kugeln nur im Einschalt-Moment geprüft und nie nachreagieren. Beide
+  sind zusätzlich an "Apple TV ist gerade an" gebunden (state != off), damit
+  sie nicht auch dann feuern, wenn der Fernseher aus ist.
 triggers:
   - trigger: media_player.turned_on
     target:
@@ -30,6 +33,16 @@ triggers:
       behavior: each
       for: '00:00:00'
     id: aus
+  - trigger: numeric_state
+    entity_id: sun.sun
+    attribute: elevation
+    below: 0
+    id: dunkel
+  - trigger: numeric_state
+    entity_id: sun.sun
+    attribute: elevation
+    above: 0
+    id: hell
 conditions: []
 actions:
   - choose:
@@ -69,6 +82,32 @@ actions:
               entity_id:
                 - light.wohnzimmer_schrank_links_haupt
                 - light.wohnzimmer_schrank_rechts_haupt
+          - action: light.turn_off
+            target:
+              entity_id: light.kugeln
+      - conditions:
+          - condition: trigger
+            id: dunkel
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+                state: "off"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: light.kugeln
+            data:
+              effect: TV time
+      - conditions:
+          - condition: trigger
+            id: hell
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+                state: "off"
+        sequence:
           - action: light.turn_off
             target:
               entity_id: light.kugeln
