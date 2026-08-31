@@ -1,0 +1,118 @@
+alias: Schrankbeleuchtung
+description: >
+  Schrankbeleuchtung im Wohnzimmer gekoppelt an den Apple TV: geht mit dem
+  Gerät an und wieder aus. Beide Richtungen in einer Automation, weil sie
+  denselben Media Player und dieselben zwei Lichter teilen - eine zweite
+  Datei hätte nur Zielposition/Entity-ID dupliziert.
+
+  Unterscheidung per Trigger-ID im "choose": ohne die Zuordnung würde beim
+  Ausschalt-Trigger dieselbe "light.turn_on"-Aktion laufen wie beim
+  Einschalten, weil beide Trigger dieselbe Automation auslösen.
+
+  Zusätzlich: light.kugeln bekommt beim Einschalten den Effekt "TV time",
+  aber nur wenn es dunkel ist (Sonne unter dem Horizont) - tagsüber bringt
+  der Effekt nichts und würde nur unnötig Licht dazuschalten.
+
+  Zwei weitere Trigger (dunkel/hell) fangen den Fall ab, dass sich die
+  Tageszeit ändert, während der Apple TV schon läuft - sonst würde
+  light.kugeln nur im Einschalt-Moment geprüft und nie nachreagieren. Beide
+  sind zusätzlich an "Apple TV ist gerade an" gebunden (state != off), damit
+  sie nicht auch dann feuern, wenn der Fernseher aus ist.
+
+  An/Aus laufen über den klassischen "state"-Trigger, nicht über
+  media_player.turned_on/turned_off: Traces vom 31.08. zeigten, dass die
+  purpose-specific Trigger nach dem ersten Auslösen aufgehört haben zu
+  feuern - vier echte Aus-/Einschaltwechsel danach erzeugten keinen
+  einzigen weiteren Trace. Der Apple TV durchläuft beim Reconnect kurz
+  Zwischenzustände (unknown/idle), was diesen Triggern offenbar die Spur
+  verliert, welcher Zustand vorher galt. "state" mit from/to kennt dieses
+  Problem nicht, weil er stumpf auf den Übergang reagiert statt intern
+  "ist gerade an/aus" zu verfolgen.
+triggers:
+  - trigger: state
+    entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+    from: "off"
+    id: an
+  - trigger: state
+    entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+    to: "off"
+    id: aus
+  - trigger: numeric_state
+    entity_id: sun.sun
+    attribute: elevation
+    below: 0
+    id: dunkel
+  - trigger: numeric_state
+    entity_id: sun.sun
+    attribute: elevation
+    above: 0
+    id: hell
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: an
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.wohnzimmer_schrank_links_haupt
+                - light.wohnzimmer_schrank_rechts_haupt
+          - if:
+              - condition: sun.elevation
+                options:
+                  threshold:
+                    type: below
+                    value:
+                      active_choice: number
+                      number: 0
+            then:
+              - action: light.turn_on
+                target:
+                  entity_id: light.kugeln
+                data:
+                  effect: TV time
+            else:
+              - action: light.turn_off
+                target:
+                  entity_id: light.kugeln
+      - conditions:
+          - condition: trigger
+            id: aus
+        sequence:
+          - action: light.turn_off
+            target:
+              entity_id:
+                - light.wohnzimmer_schrank_links_haupt
+                - light.wohnzimmer_schrank_rechts_haupt
+          - action: light.turn_off
+            target:
+              entity_id: light.kugeln
+      - conditions:
+          - condition: trigger
+            id: dunkel
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+                state: "off"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: light.kugeln
+            data:
+              effect: TV time
+      - conditions:
+          - condition: trigger
+            id: hell
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+                state: "off"
+        sequence:
+          - action: light.turn_off
+            target:
+              entity_id: light.kugeln
+mode: single
