@@ -18,20 +18,24 @@ description: >
   light.kugeln nur im Einschalt-Moment geprüft und nie nachreagieren. Beide
   sind zusätzlich an "Apple TV ist gerade an" gebunden (state != off), damit
   sie nicht auch dann feuern, wenn der Fernseher aus ist.
+
+  An/Aus laufen über den klassischen "state"-Trigger, nicht über
+  media_player.turned_on/turned_off: Traces vom 31.08. zeigten, dass die
+  purpose-specific Trigger nach dem ersten Auslösen aufgehört haben zu
+  feuern - vier echte Aus-/Einschaltwechsel danach erzeugten keinen
+  einzigen weiteren Trace. Der Apple TV durchläuft beim Reconnect kurz
+  Zwischenzustände (unknown/idle), was diesen Triggern offenbar die Spur
+  verliert, welcher Zustand vorher galt. "state" mit from/to kennt dieses
+  Problem nicht, weil er stumpf auf den Übergang reagiert statt intern
+  "ist gerade an/aus" zu verfolgen.
 triggers:
-  - trigger: media_player.turned_on
-    target:
-      entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
-    options:
-      behavior: each
-      for: '00:00:00'
+  - trigger: state
+    entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+    from: "off"
     id: an
-  - trigger: media_player.turned_off
-    target:
-      entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
-    options:
-      behavior: each
-      for: '00:00:00'
+  - trigger: state
+    entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
+    to: "off"
     id: aus
   - trigger: numeric_state
     entity_id: sun.sun

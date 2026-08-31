@@ -28,6 +28,29 @@ Automation auslösen. Die beiden Trigger tragen deshalb IDs (`an`/`aus`), und
 ein `choose` wählt anhand der Trigger-ID zwischen `light.turn_on` und
 `light.turn_off`.
 
+### An/Aus über `state` statt über purpose-specific Trigger (Fix 31.08.)
+
+Ursprünglich liefen An/Aus über `media_player.turned_on`/`turned_off`.
+Traces vom 31.08. zeigten, dass diese Trigger nach dem ersten Auslösen
+aufgehört haben zu feuern: auf 15:13:23/15:13:50 (An/Aus, beide korrekt im
+Trace sichtbar) folgten laut Aktivitätsprotokoll vier weitere echte
+Aus-/Einschaltwechsel des Apple TV (16:51/16:52 und 16:57/16:58 Uhr) - keiner
+davon erzeugte einen Trace, die Automation hat also gar nicht reagiert. Der
+Apple TV durchläuft beim Reconnect kurz Zwischenzustände (`unknown`/`idle`),
+was den purpose-specific Triggern offenbar die Spur verliert, welcher
+Zustand vorher als "aus" galt.
+
+Ersetzt durch den klassischen `state`-Trigger (`from: "off"` für An,
+`to: "off"` für Aus) - der reagiert stumpf auf den Zustandsübergang selbst,
+statt intern eine eigene "ist gerade an/aus"-Logik zu pflegen, und kennt
+das Problem deshalb nicht.
+
+(Der einzige weitere Trace aus dieser Zeit hatte `trigger: null` - eine
+manuelle Ausführung über die UI, bei der kein `trigger.id` gesetzt wird und
+deshalb erwartungsgemäß kein `choose`-Zweig zutrifft. Das ist kein Bug,
+sondern der bereits besprochene Unterschied zwischen "Automatisierung
+ausführen" und einem echten Trigger-Ereignis.)
+
 ### light.kugeln nur bei Dunkelheit
 
 Beim Einschalten bekommt `light.kugeln` zusätzlich den Effekt "TV time" -
