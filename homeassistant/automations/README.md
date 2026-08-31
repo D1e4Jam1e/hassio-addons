@@ -1,12 +1,14 @@
 # Home Assistant Automationen
 
 Vier Automationen, die sich `cover.schlafzimmer` und
-`switch.153931628878753_power` teilen:
+`switch.153931628878753_power` teilen, plus eine unabhängige
+Hysterese-Automation:
 
 | Datei | Rolle |
 | --- | --- |
 | `rolladen_schlafzimmer_schichterkennung.yaml` | Schichterkennung, Tagschlaf, Sonnenauf-/-untergang |
 | `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume, mit Bewölkt+kühl-Override |
+| `verschattung_bewoelkt_kuehl_hysterese.yaml` | setzt den Hysterese-Helper für den Bewölkt+kühl-Override |
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
@@ -245,10 +247,10 @@ Elektronik, Personen) über 23°C, schließt die Automation auch dann, wenn
 draußen keine nennenswerte Sonne durchkommt — das Verschatten bringt in dem
 Moment nichts, es verdunkelt den Raum nur unnötig.
 
-Variable `bewoelkt_kuehl` (finaler Stand nach drei Korrekturen, siehe unten):
+Variable `bewoelkt_kuehl` (finaler Stand nach vier Korrekturen, siehe unten):
 
 ```jinja
-{{ states('sensor.obersulm_willsbach_bewolkungsgrad') | float(0) > 50
+{{ is_state('input_boolean.verschattung_bewoelkt_kuehl_aktiv', 'on')
    and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
 ```
 
@@ -346,13 +348,82 @@ Entity-ID in der Variable `bewoelkt_kuehl` und im Trigger
 `bewoelkt_kuehl_open` angepasst werden (*Entwicklerwerkzeuge → Zustände*
 prüfen).
 
-**Kalibrierung der 50%-Schwelle:** wie gut die DWD-Stationsmessung die
+**Kalibrierung der Schwelle:** wie gut die DWD-Stationsmessung die
 tatsächlichen Lichtverhältnisse am Haus trifft, ist bisher nur an einem
 einzelnen Live-Abgleich (53% ≈ „ziemlich zu") festgemacht. Für einen
 belastbareren Abgleich über mehrere Tage gegen die vorhandenen
 Helligkeitssensoren (West, Süd) siehe
 `../templates/verschattung_bewoelkt_kuehl_test.yaml` — ein eigenständiger
 Test-Sensor, bewusst nicht in diese Automation eingebunden.
+
+#### Korrektur 4: Hysterese gegen Flackern um die Schwelle (siehe verschattung_bewoelkt_kuehl_hysterese.yaml)
+
+Weiter beobachtet: die Rolladen fuhren mehrmals pro Stunde hoch und runter.
+Ursache waren zwei Dinge zusammen:
+
+- `bewoelkt_kuehl` hatte nur eine einzige 50%-Schwelle (`> 50`, nicht `>= 50`)
+  für **beide** Richtungen. Ein Verlaufs-Export zeigte den Bewölkungsgrad an
+  einem Tag über gut eineinhalb Stunden rund zehnmal zwischen 49% und 56%
+  pendeln — bei jeder Überschreitung kippte die Bedingung um.
+- Der zugehörige Trigger hatte — anders als alle anderen numeric_state-Trigger
+  dieser Automation — keine `for`-Stabilisierung. Ein einzelner Messwert genau
+  auf der Schwelle reichte für einen sofortigen Lauf.
+
+Behoben durch eine echte Hysterese mit Gedächtnis, wie sie die Innentemp-Logik
+oben längst hat (Schließen erst ab >23°C, Öffnen erst wieder ab <21°C — 2°C
+Abstand statt einer einzigen Schwelle). Ein bei jedem Lauf frisch berechnetes
+Template kann sich aber nicht merken, in welchem Zustand es zuletzt war —
+dafür braucht es einen Helper. Die neue Automation
+`verschattung_bewoelkt_kuehl_hysterese.yaml` setzt
+`input_boolean.verschattung_bewoelkt_kuehl_aktiv`:
+
+- **EIN** ab Bewölkungsgrad > 55%, 5 Min. stabil
+- **AUS** erst wieder ab < 45%, 5 Min. stabil
+- dazwischen (45–55%) bleibt der zuletzt gültige Zustand einfach stehen
+
+`bewoelkt_kuehl` liest hier nur noch dieses `input_boolean`, statt den
+Rohwert live zu vergleichen — dasselbe Prinzip wie `schlafzimmer_gesperrt`,
+das ebenfalls aus einem von einer anderen Automation gesetzten Helper liest.
+
+**Mit echten Verlaufsdaten geprüft:** an einem Tag, an dem der Bewölkungsgrad
+durchgehend zwischen 50% und 56% lag (nie unter 50%, subjektiv „durchgehend
+bewölkt, keine Verschattung nötig"), wäre das `input_boolean` bereits in der
+Nacht zuvor (Werte bis 95%) auf EIN gesprungen und hätte den ganzen Tag über
+nie wieder ausgeschaltet, weil die 45%-Schwelle nie erreicht wurde — kein
+Flackern, durchgehend keine Verschattung, genau wie erwartet. Mit der alten
+Einzelschwelle (`> 50`) hätte derselbe Tag dagegen bei jeder Berührung der
+50%-Marke (u.a. exakt 50,0% einmal mittags) kurz umgeschaltet.
+
+**Voraussetzung:** Helper `input_boolean.verschattung_bewoelkt_kuehl_aktiv`
+muss existieren (*Einstellungen → Geräte & Dienste → Helfer → Schalter
+erstellen*, oder als `input_boolean:` in `configuration.yaml`) — sonst
+bleibt `bewoelkt_kuehl` dauerhaft `false` (unbekannte Entity `is_state`
+gegen `on` ergibt `false`), und die Automation fällt komplett auf die reine
+Innentemp-Logik zurück, ohne Fehler zu werfen.
+
+
+## verschattung_bewoelkt_kuehl_hysterese.yaml
+
+Eigenständige, kleine Automation — setzt nur
+`input_boolean.verschattung_bewoelkt_kuehl_aktiv`, den Hysterese-Speicher für
+den Bewölkt+kühl-Override in `verschattung_nord_ost.yaml` (siehe dort,
+Korrektur 4, für die Vorgeschichte). Bewusst getrennt statt die Logik direkt
+in der großen Automation zu berechnen: ein Template ohne Gedächtnis kann keine
+echte Zwei-Schwellen-Hysterese abbilden.
+
+- **EIN** ab `sensor.obersulm_willsbach_bewolkungsgrad` > 55%, 5 Min. stabil
+- **AUS** erst wieder ab < 45%, 5 Min. stabil
+- zusätzlicher `homeassistant`/`start`-Trigger gleicht den Helper beim
+  HA-Neustart einmalig gegen den aktuellen Messwert ab, statt bis zur
+  nächsten Schwellenüberschreitung im alten (ggf. veralteten) Zustand zu
+  verharren
+
+**Voraussetzung:** Helper `input_boolean.verschattung_bewoelkt_kuehl_aktiv`
+muss vor dem Einspielen existieren — *Einstellungen → Geräte & Dienste →
+Helfer → Hinzufügen → Schalter* (oder als `input_boolean:` in
+`configuration.yaml`). Einbinden der Automation selbst wie gewohnt: eigener
+Eintrag in `automations.yaml`, oder über die UI in ein neues
+Automatisierungs-YAML einfügen.
 
 
 ## rolladen_schlafzimmer_schichterkennung.yaml

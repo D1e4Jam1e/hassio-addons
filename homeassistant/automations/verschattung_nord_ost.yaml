@@ -72,9 +72,9 @@ description: >
     verschattet diese Automation auch dann, wenn draußen keine nennenswerte
     Sonne durchkommt - Verschatten bringt in dem Moment nichts, es
     verdunkelt den Raum nur unnötig.
-    Bedingung "bewoelkt_kuehl": sensor.obersulm_willsbach_bewolkungsgrad
-    (DWD-Bewölkungsgrad in %) > 50 UND Außentemp < 23°C. Solange das
-    zutrifft:
+    Bedingung "bewoelkt_kuehl": input_boolean.verschattung_bewoelkt_kuehl_aktiv
+    (siehe Korrektur 4 - Hysterese über eine eigene Automation) UND
+    Außentemp < 23°C. Solange das zutrifft:
       - werden alle vier Schließen-Zweige blockiert (zusätzliche Bedingung
         "not bewoelkt_kuehl"),
       - fährt ein neuer, eigener Zweig alle 5 Rolladen aktiv wieder hoch -
@@ -121,6 +121,28 @@ description: >
     damit obsolet, ebenso der Name "regen_kuehl" (Regen war nie das
     eigentliche Kriterium, sondern fehlende direkte Sonne) - Variable und
     Trigger entsprechend in "bewoelkt_kuehl" umbenannt.
+
+    KORREKTUR 4 (ergänzt heute, mehrfaches Auf-/Zufahren pro Stunde
+    beobachtet): "bewoelkt_kuehl" hatte nur eine einzige 50%-Schwelle für
+    beide Richtungen (Ein UND Aus) - pendelt der Bewölkungsgrad um die
+    Marke, kippt der Override bei jedem periodic_check (10 Min.) oder
+    jeder Trigger-Auslösung neu, genau wie es die Innentemp-Logik oben mit
+    ihrer 2°C-Hysterese (Schließen >23°C, Öffnen <21°C) verhindern soll.
+    Zusätzlich hatte der zugehörige Trigger - anders als alle anderen
+    numeric_state-Trigger dieser Automation - keine "for"-Stabilisierung:
+    ein einzelner kurzer Ausreißer über 50% löste sofort einen Lauf aus.
+
+    Behoben durch echte Hysterese mit Gedächtnis: ein Template, das bei
+    jedem Lauf frisch berechnet wird, kann sich nicht merken, in welchem
+    Zustand es zuletzt war - dafür braucht es einen Helper. Die eigene
+    Automation verschattung_bewoelkt_kuehl_hysterese.yaml setzt
+    input_boolean.verschattung_bewoelkt_kuehl_aktiv: EIN ab >55% Bewölkung
+    (5 Min. stabil), AUS erst wieder ab <45% (5 Min. stabil). Zwischen
+    45-55% bleibt der zuletzt gültige Zustand stehen, statt bei jeder
+    kleinen Schwankung umzuschalten. "bewoelkt_kuehl" liest hier nur noch
+    dieses input_boolean, statt den Rohwert live zu vergleichen - dasselbe
+    Prinzip wie "schlafzimmer_gesperrt", das ebenfalls aus einem von einer
+    anderen Automation gesetzten Helper liest statt selbst zu rechnen.
 triggers:
   - trigger: numeric_state
     entity_id: sensor.klima_schlafzimmer_temperature
@@ -185,9 +207,8 @@ triggers:
   - trigger: time_pattern
     minutes: /10
     id: periodic_check
-  - trigger: numeric_state
-    entity_id: sensor.obersulm_willsbach_bewolkungsgrad
-    above: 50
+  - trigger: state
+    entity_id: input_boolean.verschattung_bewoelkt_kuehl_aktiv
     id: bewoelkt_kuehl_open
 conditions: []
 actions:
@@ -212,14 +233,13 @@ actions:
         {{ is_state('input_select.schichtmodus_schlafzimmer', 'nacht') }}
       # Bewölkt + kühl draußen - dann bringt Verschatten nichts, es gibt
       # keine nennenswerte Sonne zu blocken. Überstimmt die reine
-      # Innentemp-Logik, siehe description (Korrekturen 1-3).
-      # sensor.obersulm_willsbach_bewolkungsgrad ist eine DWD-Stationsmessung
-      # (Prozent, HACS-Integration FL550/dwd_weather) - fehlt sie (unknown/
-      # unavailable), fällt float(0) auf "0% Bewölkung" zurück, die
-      # Override-Bedingung ist dann false und die normale Innentemp-Logik
-      # läuft unverändert weiter.
+      # Innentemp-Logik, siehe description (Korrekturen 1-4).
+      # input_boolean.verschattung_bewoelkt_kuehl_aktiv wird von der
+      # separaten Automation verschattung_bewoelkt_kuehl_hysterese.yaml
+      # gesetzt (55%/45%-Hysterese mit 5 Min. Stabilität) - hier wird nur
+      # noch gelesen, nicht mehr live gerechnet. Siehe Korrektur 4.
       bewoelkt_kuehl: >
-        {{ states('sensor.obersulm_willsbach_bewolkungsgrad') | float(0) > 50
+        {{ is_state('input_boolean.verschattung_bewoelkt_kuehl_aktiv', 'on')
            and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
   - choose:
       - alias: Schlafzimmer - Schließen
