@@ -1,7 +1,8 @@
 # Home Assistant Automationen
 
-Vier Automationen, die sich `cover.schlafzimmer` und
-`switch.153931628878753_power` teilen:
+Fünf Automationen, die sich `cover.schlafzimmer` und
+`switch.153931628878753_power` teilen, plus eine sechste, die die
+Schichterkennung als reinen Konsumenten weiterverwendet:
 
 | Datei | Rolle |
 | --- | --- |
@@ -10,6 +11,7 @@ Vier Automationen, die sich `cover.schlafzimmer` und
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
+| `evcc_ladeplan_schichtsynchronisation.yaml` | evcc-Ladeplan (Highlander) an die Schichterkennung koppeln |
 
 ## verschattung_west.yaml
 
@@ -354,6 +356,153 @@ Helligkeitssensoren (West, Süd) siehe
 `../templates/verschattung_bewoelkt_kuehl_test.yaml` — ein eigenständiger
 Test-Sensor, bewusst nicht in diese Automation eingebunden.
 
+
+## evcc_ladeplan_schichtsynchronisation.yaml
+
+### Warum diese Automation nötig ist
+
+Die Frau des Hauses nutzt die evcc-App nicht — sie steckt das Auto ein und
+verlässt sich darauf, dass es "irgendwie" lädt. Evcc hat für das Fahrzeug
+"Highlander" drei wiederkehrende Ladepläne hinterlegt (einen je Schicht,
+mit passender Zielzeit), aber ohne manuelles Umschalten in der App wäre
+entweder der falsche Plan aktiv (z.B. noch der von der letzten Schicht)
+oder gar keiner.
+
+Die Automation verwendet dafür keine eigene Logik zur Schichterkennung,
+sondern liest ausschließlich `input_select.schichtmodus_schlafzimmer`, das
+bereits von `rolladen_schlafzimmer_schichterkennung.yaml` zuverlässig
+gepflegt wird — mit allen dortigen Absicherungen (Anwesenheitsprüfung,
+Heimkehr-Netz usw.). Eine zweite, unabhängige Schichterkennung hätte nur
+eine weitere Fehlerquelle bedeutet, die mit der ersten auseinanderlaufen
+kann.
+
+### Zuordnung Schicht → Ladeplan-Switch
+
+| Schichtmodus | Ladeplan-Switch |
+| --- | --- |
+| `frueh` | `switch.evcc_highlander_repeating_plan_2` |
+| `nacht` | `switch.evcc_highlander_repeating_plan_3` |
+| `spaet` | `switch.evcc_highlander_repeating_plan_4` |
+| `keine` | keiner — alle drei aus |
+
+Immer höchstens ein Plan-Switch ist an. Bei `keine` (normaler Tag ohne
+erkannten Schichtdienst) werden alle drei ausgeschaltet; evcc lädt dann nur
+noch nach dem Standard-Lademodus, ohne feste Zielzeit.
+
+### Lademodus bleibt unangetastet
+
+Der evcc-Lademodus (das Select für `pv`/`minpv`/`now`/`off`) wird hier
+bewusst nicht automatisiert. Er steht laut Vorgabe dauerhaft auf `minpv`
+(Mindestladeleistung + Überschuss) und soll das auch bleiben — nur die
+Zielzeit/Ziel-SoC über den passenden wiederkehrenden Plan soll sich
+automatisch anpassen.
+
+### `binary_sensor.evcc_amperfied_connected` wird nicht gebraucht
+
+Ursprünglich als möglicher Trigger ("Auto wird angesteckt") in Betracht
+gezogen. Ist aber nicht nötig: ein aktiver Plan-Switch ohne angestecktes
+Auto tut nichts — evcc reserviert damit nur eine Zielzeit für ein Fahrzeug,
+das gerade nicht lädt. Die Synchronisation läuft deshalb rein am
+Schichtmodus, unabhängig vom Verbunden-Status. Das hält die Automation
+einfacher und sie funktioniert auch dann korrekt, wenn das Auto erst nach
+dem Schichtwechsel angesteckt wird.
+
+### Soll/Ist-Abgleich statt bedingungslosem Schalten
+
+Die Automation vergleicht vor jeder Aktion, welche Plan-Switches gerade an
+sind, mit dem aus dem Schichtmodus abgeleiteten Sollzustand
+(`aenderung_noetig`). Nur bei einer tatsächlichen Abweichung wird
+überhaupt geschaltet und geloggt. Das hat zwei Gründe:
+
+- Der 10-Minuten-Backup-Trigger (siehe unten) würde sonst alle 10 Minuten
+  einen Logbuch-Eintrag erzeugen, auch wenn nichts passiert ist.
+- `switch.turn_on`/`turn_off` auf einen bereits passenden Switch ist zwar
+  harmlos, aber unnötig — der Vergleich macht sichtbar, *warum* geschaltet
+  wurde (Abweichung erkannt), statt bei jedem Lauf blind zu schalten.
+
+### evcc/HA reagieren unzuverlässig — Retry mit Verifikation (29.09.2026)
+
+Im ersten Test (Trace vom 30.09., Wechsel `keine` → `frueh`) zeigte sich:
+noch bevor die Automation in diesem Lauf überhaupt etwas geschaltet hat,
+war der tatsächliche Zustand bereits `["switch.evcc_highlander_repeating_plan_3"]`
+(Nacht) — obwohl der Schichtmodus laut Trigger-`from_state` schon vorher auf
+`keine` stand. Der Wechsel auf `keine` in einem *vorherigen* Lauf hatte
+`plan_3` also trotz erfolgreich geloggtem `turn_off` nicht wirklich
+ausgeschaltet.
+
+Rückmeldung aus dem Betrieb bestätigt das als evcc/HA-seitiges Problem,
+nicht als Logikfehler dieser Automation: die evcc-Oberfläche selbst zeigt
+öfter keinen bzw. einen falschen aktiven Plan an, und auch manuelle
+Schalter-Klicks dort reagieren teils optisch gar nicht. Der Wechsel auf
+`keine` klemmt dabei besonders häufig, vor allem aus `spaet` oder `nacht`.
+Home Assistant setzt den Switch-State nach `switch.turn_on`/`turn_off`
+vermutlich optimistisch, bevor evcc die Änderung bestätigt bzw. bevor der
+Integrations-Coordinator neu gepollt hat — ein einzelner Schaltbefehl ist
+deshalb nicht zuverlässig genug.
+
+Die Automation schaltet jetzt in einer Schleife (`repeat.while`, max. 3
+Versuche):
+
+1. `switch.turn_off`/`turn_on` wie bisher.
+2. 5 Sekunden warten.
+3. `homeassistant.update_entity` auf alle drei Plan-Switches — erzwingt
+   einen sofortigen Reload statt auf den nächsten regulären Poll-Zyklus der
+   evcc-Integration zu warten.
+4. Soll/Ist erneut vergleichen. Passt es, endet die Schleife; sonst nächster
+   Versuch (max. 3).
+
+Ergebnis nach der Schleife:
+
+- **Erfolg beim ersten Versuch**: normale Logbuch-Meldung wie bisher.
+- **Erfolg erst nach Wiederholung**: dieselbe Meldung, ergänzt um „(erst im
+  N. Versuch übernommen)" — sichtbares Warnsignal, dass evcc gerade
+  langsam/unzuverlässig reagiert, ohne dass etwas kaputt ist.
+- **Nach 3 Versuchen weiterhin falsch**: eigene `FEHLER:`-Logbuch-Meldung
+  mit dem tatsächlich noch aktiven Switch — bewusst nicht mehr stillschweigend
+  nur dem 10-Minuten-Backup-Trigger überlassen, damit ein dauerhaftes
+  evcc-Problem auffällt statt bis zu 10 Minuten unbemerkt zu bleiben.
+
+`mode` deshalb von `single` auf `queued` (`max: 3`) geändert: die
+Retry-Schleife kann bis zu ~30 Sekunden dauern. Bei `single` hätte ein in
+dieser Zeit auslösender 10-Minuten-Backup-Trigger (oder ein sehr kurz
+aufeinanderfolgender Schichtwechsel) den laufenden Versuch kommentarlos
+verworfen, statt danach nachzuziehen.
+
+### 10-Minuten-Backup-Trigger
+
+Wie bei der Schichterkennung selbst: das Betreten der Zone bzw. der
+State-Wechsel von `input_select.schichtmodus_schlafzimmer` ist ein
+einmaliges Ereignis. Geht es verloren (HA-Neustart, verpasster
+State-Change) oder wird ein Plan-Switch manuell in der evcc-App
+umgestellt, würde ohne Backup-Trigger der falsche Plan bis zum nächsten
+Schichtwechsel aktiv bleiben. Der `time_pattern`-Trigger alle 10 Minuten
+gleicht das über denselben Soll/Ist-Vergleich (inkl. Retry-Schleife) aus —
+er ist jetzt das zweite Netz für den Fall, dass selbst die 3 Versuche
+direkt nach dem Schichtwechsel nicht gereicht haben (z.B. weil evcc über
+einen längeren Zeitraum nicht erreichbar war).
+
+### Voraussetzung
+
+- `input_select.schichtmodus_schlafzimmer` (siehe
+  `rolladen_schlafzimmer_schichterkennung.yaml`) muss existieren und
+  aktuell gepflegt werden.
+- Die drei evcc-Switches `switch.evcc_highlander_repeating_plan_2/3/4`
+  müssen in evcc als wiederkehrende Pläne mit den gewünschten Zielzeiten
+  für die jeweilige Schicht angelegt sein — diese Automation schaltet nur
+  die Switches, sie legt die Pläne selbst nicht an.
+
+### Bekannte Einschränkung: hängt an der Schichterkennung
+
+Diese Automation erkennt selbst keine Schicht — sie spiegelt nur den
+aktuellen Wert von `input_select.schichtmodus_schlafzimmer` auf die
+Plan-Switches. Erkennt `rolladen_schlafzimmer_schichterkennung.yaml` eine
+Schicht verspätet oder gar nicht (siehe deren eigene bekannte Lücken oben,
+z.B. verpasstes Ankunfts-Event, GPS-Sprung), bleibt hier ebenso lange der
+falsche oder gar kein Ladeplan aktiv. Der 10-Minuten-Backup-Trigger gleicht
+nur den Plan-Switch-Zustand gegen den *aktuellen* Wert der Entität ab — er
+korrigiert keine falsche oder fehlende Schichterkennung selbst. Eine
+Korrektur dort (z.B. robustere Erkennung) wirkt sich automatisch auch hier
+aus, ohne dass diese Automation angepasst werden muss.
 
 ## rolladen_schlafzimmer_schichterkennung.yaml
 
