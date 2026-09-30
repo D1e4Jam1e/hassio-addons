@@ -19,12 +19,34 @@ description: >
   angefasst - er steht laut Vorgabe dauerhaft auf "minpv" und soll nicht
   automatisiert werden.
 
+  EVCC/HA REAGIEREN UNZUVERLÄSSIG - RETRY MIT VERIFIKATION (29.09.2026):
+  Im Test blieb nach einem Schichtwechsel teils der alte Plan-Switch an
+  (v.a. bei Übergängen zu "keine" aus "spaet"/"nacht"), obwohl
+  switch.turn_off/turn_on erfolgreich aufgerufen wurden - die evcc-eigene
+  Oberfläche zeigt laut Beobachtung ebenfalls öfter einen falschen bzw.
+  keinen aktiven Plan an und reagiert auf Schalter-Klicks teils verzögert
+  oder gar nicht. Home Assistant setzt den Switch-State nach dem
+  Service-Aufruf vermutlich optimistisch, bevor evcc die Änderung bestätigt
+  bzw. bevor der Integrations-Coordinator neu gepollt hat - deshalb reicht
+  ein einmaliger Schaltbefehl nicht zuverlässig.
+  Die Automation schaltet deshalb in einer Schleife (max. 3 Versuche): nach
+  turn_off/turn_on werden 5 Sekunden gewartet, per
+  homeassistant.update_entity ein sofortiger Reload der drei Switch-Entities
+  erzwungen (statt auf den nächsten regulären Poll zu warten) und danach der
+  Soll/Ist-Zustand erneut geprüft. Erst wenn er passt oder 3 Versuche
+  aufgebraucht sind, endet die Schleife. Bleibt es nach 3 Versuchen falsch,
+  wird das explizit als Fehler ins Logbuch geschrieben (nicht nur stillos
+  dem 10-Minuten-Backup-Trigger überlassen) - damit sichtbar ist, dass evcc
+  manuell geprüft werden muss.
+
   ROBUSTHEIT: neben dem State-Trigger auf den Schichtmodus läuft ein
-  10-Minuten-Backup-Trigger, der denselben Soll/Ist-Abgleich macht - falls
-  z.B. ein Plan-Switch manuell in der evcc-App umgestellt wurde oder ein
-  Event verlorenging (HA-Neustart, verpasster State-Change). Geloggt wird
-  nur, wenn tatsächlich etwas geändert wurde, damit das Logbuch nicht bei
-  jedem 10-Minuten-Lauf vollgeschrieben wird.
+  10-Minuten-Backup-Trigger, der denselben Soll/Ist-Abgleich (inkl.
+  Retry-Schleife) macht - falls z.B. ein Plan-Switch manuell in der
+  evcc-App umgestellt wurde, ein Event verlorenging (HA-Neustart,
+  verpasster State-Change) oder selbst die 3 Versuche direkt nach dem
+  Schichtwechsel nicht ausgereicht haben. Geloggt wird nur, wenn tatsächlich
+  etwas geändert werden musste, damit das Logbuch nicht bei jedem
+  10-Minuten-Lauf vollgeschrieben wird.
 
   Voraussetzung: input_select.schichtmodus_schlafzimmer wird bereits von
   rolladen_schlafzimmer_schichterkennung.yaml gepflegt - diese Automation
@@ -36,9 +58,12 @@ description: >
   rolladen_schlafzimmer_schichterkennung.yaml eine Schicht verspätet oder
   gar nicht (siehe deren eigene bekannte Lücken, z.B. verpasstes
   Ankunfts-Event, GPS-Sprung), bleibt hier ebenso lange der falsche oder
-  kein Ladeplan aktiv. Der 10-Minuten-Backup-Trigger gleicht nur den
-  Plan-Switch-Zustand gegen den *aktuellen* Wert der Entität ab - er
-  korrigiert keine falsche oder fehlende Schichterkennung.
+  kein Ladeplan aktiv.
+
+  mode: queued statt single - die Retry-Schleife kann bis zu ca. 30
+  Sekunden dauern; bei "single" würde ein während dieser Zeit ausgelöster
+  10-Minuten-Backup-Trigger (oder ein sehr kurz aufeinanderfolgender
+  Schichtwechsel) sonst kommentarlos verworfen.
 triggers:
   - trigger: state
     entity_id: input_select.schichtmodus_schlafzimmer
@@ -63,30 +88,79 @@ actions:
            | map(attribute='entity_id') | sort | list }}
       soll_aktiv: "{{ [soll_switch] if soll_switch != '' else [] }}"
       aenderung_noetig: "{{ aktive_switches != soll_aktiv }}"
+      # Für die Logbuch-Meldung am Ende: Ausgangszustand und ob überhaupt
+      # etwas zu tun war merken, bevor die Schleife aktive_switches/
+      # aenderung_noetig überschreibt.
+      aktive_switches_vorher: "{{ aktive_switches }}"
+      sync_erforderlich: "{{ aenderung_noetig }}"
+  # Bis zu 3 Versuche: schalten, kurz warten, Entities zwangsweise neu
+  # pollen (statt auf den nächsten regulären Poll-Zyklus zu warten) und
+  # danach erneut prüfen. Läuft nur an, solange noch eine Abweichung
+  # besteht (aenderung_noetig) - bei bereits korrektem Zustand macht die
+  # while-Vorbedingung die Schleife zum No-Op.
+  - repeat:
+      while:
+        - condition: template
+          value_template: "{{ aenderung_noetig and repeat.index <= 3 }}"
+      sequence:
+        - action: switch.turn_off
+          target:
+            entity_id: >-
+              {{ plan_switches.values() | reject('eq', soll_switch) | list }}
+          data: {}
+        - if:
+            - condition: template
+              value_template: "{{ soll_switch != '' }}"
+          then:
+            - action: switch.turn_on
+              target:
+                entity_id: "{{ soll_switch }}"
+              data: {}
+        - delay:
+            seconds: 5
+        - action: homeassistant.update_entity
+          target:
+            entity_id: "{{ plan_switches.values() | list }}"
+          data: {}
+        - variables:
+            versuche: "{{ repeat.index }}"
+            aktive_switches: >-
+              {{ expand(plan_switches.values() | list)
+                 | selectattr('state', 'eq', 'on')
+                 | map(attribute='entity_id') | sort | list }}
+            aenderung_noetig: "{{ aktive_switches != soll_aktiv }}"
   - if:
       - condition: template
-        value_template: "{{ aenderung_noetig }}"
+        value_template: "{{ sync_erforderlich }}"
     then:
-      - action: switch.turn_off
-        target:
-          entity_id: >-
-            {{ plan_switches.values() | reject('eq', soll_switch) | list }}
-        data: {}
       - if:
           - condition: template
-            value_template: "{{ soll_switch != '' }}"
+            value_template: "{{ aenderung_noetig }}"
         then:
-          - action: switch.turn_on
-            target:
-              entity_id: "{{ soll_switch }}"
-            data: {}
-      - action: logbook.log
-        data:
-          entity_id: input_select.schichtmodus_schlafzimmer
-          name: EVCC Ladeplan Schichtsynchronisation
-          message: >-
-            Schichtmodus "{{ schicht }}" -> Ladeplan
-            {{ soll_switch.split('.')[-1] if soll_switch != '' else
-               'aus (kein Schichtdienst)' }} aktiviert (vorher aktiv:
-            {{ aktive_switches | join(', ') if aktive_switches else 'keiner' }}).
-mode: single
+          - action: logbook.log
+            data:
+              entity_id: input_select.schichtmodus_schlafzimmer
+              name: EVCC Ladeplan Schichtsynchronisation
+              message: >-
+                FEHLER: Schichtmodus "{{ schicht }}" -> Ladeplan
+                {{ soll_switch.split('.')[-1] if soll_switch != '' else
+                   'aus (kein Schichtdienst)' }} nach 3 Versuchen NICHT
+                übernommen - evcc/HA meldet weiterhin aktiv:
+                {{ aktive_switches | join(', ') if aktive_switches else
+                   'keiner' }}. Bitte evcc-App und Entwicklerwerkzeuge ->
+                Zustände manuell prüfen.
+        else:
+          - action: logbook.log
+            data:
+              entity_id: input_select.schichtmodus_schlafzimmer
+              name: EVCC Ladeplan Schichtsynchronisation
+              message: >-
+                Schichtmodus "{{ schicht }}" -> Ladeplan
+                {{ soll_switch.split('.')[-1] if soll_switch != '' else
+                   'aus (kein Schichtdienst)' }} aktiviert
+                {{ '(erst im ' ~ versuche ~ '. Versuch übernommen)'
+                   if versuche | default(1) | int > 1 else '' }}
+                (vorher aktiv: {{ aktive_switches_vorher | join(', ')
+                   if aktive_switches_vorher else 'keiner' }}).
+mode: queued
+max: 3

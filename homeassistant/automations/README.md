@@ -412,13 +412,61 @@ dem Schichtwechsel angesteckt wird.
 Die Automation vergleicht vor jeder Aktion, welche Plan-Switches gerade an
 sind, mit dem aus dem Schichtmodus abgeleiteten Sollzustand
 (`aenderung_noetig`). Nur bei einer tatsächlichen Abweichung wird
-geschaltet und geloggt. Das hat zwei Gründe:
+überhaupt geschaltet und geloggt. Das hat zwei Gründe:
 
 - Der 10-Minuten-Backup-Trigger (siehe unten) würde sonst alle 10 Minuten
   einen Logbuch-Eintrag erzeugen, auch wenn nichts passiert ist.
 - `switch.turn_on`/`turn_off` auf einen bereits passenden Switch ist zwar
   harmlos, aber unnötig — der Vergleich macht sichtbar, *warum* geschaltet
   wurde (Abweichung erkannt), statt bei jedem Lauf blind zu schalten.
+
+### evcc/HA reagieren unzuverlässig — Retry mit Verifikation (29.09.2026)
+
+Im ersten Test (Trace vom 30.09., Wechsel `keine` → `frueh`) zeigte sich:
+noch bevor die Automation in diesem Lauf überhaupt etwas geschaltet hat,
+war der tatsächliche Zustand bereits `["switch.evcc_highlander_repeating_plan_3"]`
+(Nacht) — obwohl der Schichtmodus laut Trigger-`from_state` schon vorher auf
+`keine` stand. Der Wechsel auf `keine` in einem *vorherigen* Lauf hatte
+`plan_3` also trotz erfolgreich geloggtem `turn_off` nicht wirklich
+ausgeschaltet.
+
+Rückmeldung aus dem Betrieb bestätigt das als evcc/HA-seitiges Problem,
+nicht als Logikfehler dieser Automation: die evcc-Oberfläche selbst zeigt
+öfter keinen bzw. einen falschen aktiven Plan an, und auch manuelle
+Schalter-Klicks dort reagieren teils optisch gar nicht. Der Wechsel auf
+`keine` klemmt dabei besonders häufig, vor allem aus `spaet` oder `nacht`.
+Home Assistant setzt den Switch-State nach `switch.turn_on`/`turn_off`
+vermutlich optimistisch, bevor evcc die Änderung bestätigt bzw. bevor der
+Integrations-Coordinator neu gepollt hat — ein einzelner Schaltbefehl ist
+deshalb nicht zuverlässig genug.
+
+Die Automation schaltet jetzt in einer Schleife (`repeat.while`, max. 3
+Versuche):
+
+1. `switch.turn_off`/`turn_on` wie bisher.
+2. 5 Sekunden warten.
+3. `homeassistant.update_entity` auf alle drei Plan-Switches — erzwingt
+   einen sofortigen Reload statt auf den nächsten regulären Poll-Zyklus der
+   evcc-Integration zu warten.
+4. Soll/Ist erneut vergleichen. Passt es, endet die Schleife; sonst nächster
+   Versuch (max. 3).
+
+Ergebnis nach der Schleife:
+
+- **Erfolg beim ersten Versuch**: normale Logbuch-Meldung wie bisher.
+- **Erfolg erst nach Wiederholung**: dieselbe Meldung, ergänzt um „(erst im
+  N. Versuch übernommen)" — sichtbares Warnsignal, dass evcc gerade
+  langsam/unzuverlässig reagiert, ohne dass etwas kaputt ist.
+- **Nach 3 Versuchen weiterhin falsch**: eigene `FEHLER:`-Logbuch-Meldung
+  mit dem tatsächlich noch aktiven Switch — bewusst nicht mehr stillschweigend
+  nur dem 10-Minuten-Backup-Trigger überlassen, damit ein dauerhaftes
+  evcc-Problem auffällt statt bis zu 10 Minuten unbemerkt zu bleiben.
+
+`mode` deshalb von `single` auf `queued` (`max: 3`) geändert: die
+Retry-Schleife kann bis zu ~30 Sekunden dauern. Bei `single` hätte ein in
+dieser Zeit auslösender 10-Minuten-Backup-Trigger (oder ein sehr kurz
+aufeinanderfolgender Schichtwechsel) den laufenden Versuch kommentarlos
+verworfen, statt danach nachzuziehen.
 
 ### 10-Minuten-Backup-Trigger
 
@@ -428,7 +476,10 @@ einmaliges Ereignis. Geht es verloren (HA-Neustart, verpasster
 State-Change) oder wird ein Plan-Switch manuell in der evcc-App
 umgestellt, würde ohne Backup-Trigger der falsche Plan bis zum nächsten
 Schichtwechsel aktiv bleiben. Der `time_pattern`-Trigger alle 10 Minuten
-gleicht das über denselben Soll/Ist-Vergleich aus.
+gleicht das über denselben Soll/Ist-Vergleich (inkl. Retry-Schleife) aus —
+er ist jetzt das zweite Netz für den Fall, dass selbst die 3 Versuche
+direkt nach dem Schichtwechsel nicht gereicht haben (z.B. weil evcc über
+einen längeren Zeitraum nicht erreichbar war).
 
 ### Voraussetzung
 
