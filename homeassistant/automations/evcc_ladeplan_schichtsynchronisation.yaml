@@ -29,6 +29,16 @@ description: >
   Voraussetzung: input_select.schichtmodus_schlafzimmer wird bereits von
   rolladen_schlafzimmer_schichterkennung.yaml gepflegt - diese Automation
   liest sie nur, ändert sie nie.
+
+  BEKANNTE EINSCHRÄNKUNG: diese Automation erkennt selbst keine Schicht,
+  sondern spiegelt nur den aktuellen Wert von
+  input_select.schichtmodus_schlafzimmer auf die Plan-Switches. Erkennt
+  rolladen_schlafzimmer_schichterkennung.yaml eine Schicht verspätet oder
+  gar nicht (siehe deren eigene bekannte Lücken, z.B. verpasstes
+  Ankunfts-Event, GPS-Sprung), bleibt hier ebenso lange der falsche oder
+  kein Ladeplan aktiv. Der 10-Minuten-Backup-Trigger gleicht nur den
+  Plan-Switch-Zustand gegen den *aktuellen* Wert der Entität ab - er
+  korrigiert keine falsche oder fehlende Schichterkennung.
 triggers:
   - trigger: state
     entity_id: input_select.schichtmodus_schlafzimmer

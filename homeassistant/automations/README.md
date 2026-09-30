@@ -440,6 +440,19 @@ gleicht das über denselben Soll/Ist-Vergleich aus.
   für die jeweilige Schicht angelegt sein — diese Automation schaltet nur
   die Switches, sie legt die Pläne selbst nicht an.
 
+### Bekannte Einschränkung: hängt an der Schichterkennung
+
+Diese Automation erkennt selbst keine Schicht — sie spiegelt nur den
+aktuellen Wert von `input_select.schichtmodus_schlafzimmer` auf die
+Plan-Switches. Erkennt `rolladen_schlafzimmer_schichterkennung.yaml` eine
+Schicht verspätet oder gar nicht (siehe deren eigene bekannte Lücken oben,
+z.B. verpasstes Ankunfts-Event, GPS-Sprung), bleibt hier ebenso lange der
+falsche oder gar kein Ladeplan aktiv. Der 10-Minuten-Backup-Trigger gleicht
+nur den Plan-Switch-Zustand gegen den *aktuellen* Wert der Entität ab — er
+korrigiert keine falsche oder fehlende Schichterkennung selbst. Eine
+Korrektur dort (z.B. robustere Erkennung) wirkt sich automatisch auch hier
+aus, ohne dass diese Automation angepasst werden muss.
+
 ## rolladen_schlafzimmer_schichterkennung.yaml
 
 Rolladensteuerung Schlafzimmer mit automatischer Schichterkennung über den
