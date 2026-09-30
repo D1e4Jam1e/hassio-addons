@@ -1,0 +1,82 @@
+alias: EVCC Ladeplan Schichtsynchronisation
+description: >
+  Koppelt die wiederkehrenden evcc-Ladepläne des Fahrzeugs "Highlander" an
+  die Schichterkennung aus "Rolladen Schlafzimmer (Schichterkennung über
+  Standort)" (input_select.schichtmodus_schlafzimmer). Grund: die Frau des
+  Hauses nutzt die evcc-App nicht und steckt das Auto einfach an - ohne
+  diese Automation wäre entweder der falsche oder gar kein Ladeplan aktiv.
+
+  ZUORDNUNG (evcc-seitig als wiederkehrender Plan je Schicht angelegt):
+    frueh -> switch.evcc_highlander_repeating_plan_2
+    nacht -> switch.evcc_highlander_repeating_plan_3
+    spaet -> switch.evcc_highlander_repeating_plan_4
+  Es ist immer höchstens einer der drei Switches an, alle anderen aus. Bei
+  Schichtmodus "keine" (kein erkannter Schichtdienst, normaler Tag) werden
+  alle drei ausgeschaltet - evcc lädt dann nur noch nach dem Standard-
+  Lademodus, ohne feste Zielzeit.
+
+  Der Lademodus selbst (select für pv/minpv/now/off) wird hier bewusst NICHT
+  angefasst - er steht laut Vorgabe dauerhaft auf "minpv" und soll nicht
+  automatisiert werden.
+
+  ROBUSTHEIT: neben dem State-Trigger auf den Schichtmodus läuft ein
+  10-Minuten-Backup-Trigger, der denselben Soll/Ist-Abgleich macht - falls
+  z.B. ein Plan-Switch manuell in der evcc-App umgestellt wurde oder ein
+  Event verlorenging (HA-Neustart, verpasster State-Change). Geloggt wird
+  nur, wenn tatsächlich etwas geändert wurde, damit das Logbuch nicht bei
+  jedem 10-Minuten-Lauf vollgeschrieben wird.
+
+  Voraussetzung: input_select.schichtmodus_schlafzimmer wird bereits von
+  rolladen_schlafzimmer_schichterkennung.yaml gepflegt - diese Automation
+  liest sie nur, ändert sie nie.
+triggers:
+  - trigger: state
+    entity_id: input_select.schichtmodus_schlafzimmer
+    id: schichtwechsel
+  - trigger: time_pattern
+    minutes: "/10"
+    id: periodic_check
+conditions: []
+actions:
+  - variables:
+      schicht: "{{ states('input_select.schichtmodus_schlafzimmer') }}"
+      plan_switches:
+        frueh: switch.evcc_highlander_repeating_plan_2
+        nacht: switch.evcc_highlander_repeating_plan_3
+        spaet: switch.evcc_highlander_repeating_plan_4
+      # '' bei "keine" oder einem unbekannten Wert - dann sollen alle drei
+      # Pläne aus sein.
+      soll_switch: "{{ plan_switches.get(schicht, '') }}"
+      aktive_switches: >-
+        {{ expand(plan_switches.values() | list)
+           | selectattr('state', 'eq', 'on')
+           | map(attribute='entity_id') | sort | list }}
+      soll_aktiv: "{{ [soll_switch] if soll_switch != '' else [] }}"
+      aenderung_noetig: "{{ aktive_switches != soll_aktiv }}"
+  - if:
+      - condition: template
+        value_template: "{{ aenderung_noetig }}"
+    then:
+      - action: switch.turn_off
+        target:
+          entity_id: >-
+            {{ plan_switches.values() | reject('eq', soll_switch) | list }}
+        data: {}
+      - if:
+          - condition: template
+            value_template: "{{ soll_switch != '' }}"
+        then:
+          - action: switch.turn_on
+            target:
+              entity_id: "{{ soll_switch }}"
+            data: {}
+      - action: logbook.log
+        data:
+          entity_id: input_select.schichtmodus_schlafzimmer
+          name: EVCC Ladeplan Schichtsynchronisation
+          message: >-
+            Schichtmodus "{{ schicht }}" -> Ladeplan
+            {{ soll_switch.split('.')[-1] if soll_switch != '' else
+               'aus (kein Schichtdienst)' }} aktiviert (vorher aktiv:
+            {{ aktive_switches | join(', ') if aktive_switches else 'keiner' }}).
+mode: single
