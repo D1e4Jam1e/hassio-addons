@@ -383,11 +383,44 @@ kann.
 | `frueh` | `switch.evcc_highlander_repeating_plan_2` |
 | `nacht` | `switch.evcc_highlander_repeating_plan_3` |
 | `spaet` | `switch.evcc_highlander_repeating_plan_4` |
-| `keine` | keiner — alle drei aus |
 
-Immer höchstens ein Plan-Switch ist an. Bei `keine` (normaler Tag ohne
-erkannten Schichtdienst) werden alle drei ausgeschaltet; evcc lädt dann nur
-noch nach dem Standard-Lademodus, ohne feste Zielzeit.
+Immer höchstens ein Plan-Switch ist an. Wann alle drei aus sind, steht im
+nächsten Abschnitt — das ist seit der Korrektur vom 18.10. nicht mehr
+einfach "Schichtmodus = `keine`".
+
+### „keine" bedeutet nicht „kein Schichtdienst" (18.10.2026 — Korrektur)
+
+**Beobachtung im Betrieb:** der Ladeplan wurde teils schon Stunden vor dem
+eigentlichen Bedarf wieder deaktiviert — z.B. morgens nach einer
+Nachtschicht, obwohl am selben Abend die nächste Nachtschicht anstand.
+
+**Ursache:** `input_select.schichtmodus_schlafzimmer` geht in
+`rolladen_schlafzimmer_schichterkennung.yaml` **mehrmals täglich** auf
+`keine` zurück — Aufwach-Erkennung, 16:00-Sicherheitsnetz, Boden-Zeit nach
+der Spätschicht, 21:30-Reset von `frueh`. Dort markiert das nur das Ende der
+jeweiligen Schlafschutz-Phase (Rolladen/Klima), nicht „in absehbarer Zeit
+kein Schichtdienst mehr". Die ursprüngliche Annahme dieser Automation —
+`keine` heißt „alle Pläne aus" — war also falsch: sie hat den Ladeplan
+jedes Mal gekappt, wenn der Rolladen-Automation ihre eigene, kurzlebige
+Schlafschutz-Phase beendet hat.
+
+**Fix:** Diese Automation reagiert jetzt nicht mehr auf `keine`. Wechselt
+der Schichtmodus auf `keine`, bleibt der zuletzt aktivierte Plan-Switch
+unverändert stehen, bis tatsächlich eine andere Schicht (`frueh`/`spaet`/
+`nacht`) erkannt wird — `sync_ueberspringen` überspringt dann den gesamten
+Soll/Ist-Abgleich inklusive Logging. Echtes „kein Schichtdienst" (Urlaub)
+läuft seitdem über `input_boolean.urlaubsmodus_schlafzimmer`: steht es auf
+`on`, erzwingt die Automation `soll_switch = ''` und schaltet alle drei
+Pläne aus — unabhängig vom aktuellen Schichtmodus. Ein eigener State-Trigger
+auf diesen Helfer (`to: "on"`) sorgt dafür, dass das sofort beim Start des
+Urlaubsmodus passiert, nicht erst beim nächsten Schichtwechsel oder
+10-Minuten-Lauf.
+
+**Bewusst in Kauf genommene Nebenwirkung:** an einem echten freien Tag ohne
+aktiven Urlaubsmodus bleibt der zuletzt aktive Plan stehen, obwohl er an
+diesem Tag nicht gebraucht wird — evcc lädt dann ggf. etwas früher auf
+100 % als nötig. Harmlos gegenüber der vorherigen Fehlrichtung (Ladeplan
+fehlt am Arbeitstag).
 
 ### Lademodus bleibt unangetastet
 
@@ -486,6 +519,9 @@ einen längeren Zeitraum nicht erreichbar war).
 - `input_select.schichtmodus_schlafzimmer` (siehe
   `rolladen_schlafzimmer_schichterkennung.yaml`) muss existieren und
   aktuell gepflegt werden.
+- `input_boolean.urlaubsmodus_schlafzimmer` muss existieren (wird auch von
+  der Rolladen-Automation genutzt) — steuert, wann wirklich alle drei
+  Pläne ausgeschaltet werden (siehe oben).
 - Die drei evcc-Switches `switch.evcc_highlander_repeating_plan_2/3/4`
   müssen in evcc als wiederkehrende Pläne mit den gewünschten Zielzeiten
   für die jeweilige Schicht angelegt sein — diese Automation schaltet nur
