@@ -416,11 +416,16 @@ auf diesen Helfer (`to: "on"`) sorgt dafür, dass das sofort beim Start des
 Urlaubsmodus passiert, nicht erst beim nächsten Schichtwechsel oder
 10-Minuten-Lauf.
 
-**Bewusst in Kauf genommene Nebenwirkung:** an einem echten freien Tag ohne
-aktiven Urlaubsmodus bleibt der zuletzt aktive Plan stehen, obwohl er an
-diesem Tag nicht gebraucht wird — evcc lädt dann ggf. etwas früher auf
-100 % als nötig. Harmlos gegenüber der vorherigen Fehlrichtung (Ladeplan
-fehlt am Arbeitstag).
+**Bewusst in Kauf genommene Nebenwirkung — entschärft durch Mo–Fr-Begrenzung:**
+an einem echten freien Tag ohne aktiven Urlaubsmodus bleibt der zuletzt
+aktive Plan-Switch stehen, obwohl er an diesem Tag nicht gebraucht wird.
+In der Praxis fällt das kaum ins Gewicht: die drei Ladepläne sind in evcc
+selbst fest auf Montag–Freitag eingeschränkt. Ein stehengebliebener Switch
+wirkt sich am Wochenende also ohnehin nicht aus — evcc wendet den Plan dort
+unabhängig vom Switch-Zustand nicht an. Relevant bleibt der Nebeneffekt nur
+für einen einzelnen freien Werktag zwischen zwei Schichten (z.B. ein
+Frei-Montag) — auch dort harmlos gegenüber der vorherigen Fehlrichtung
+(Ladeplan fehlt am Arbeitstag).
 
 ### Lademodus bleibt unangetastet
 

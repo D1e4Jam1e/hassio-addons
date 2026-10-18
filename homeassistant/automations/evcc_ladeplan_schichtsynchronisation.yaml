@@ -34,10 +34,13 @@ description: >
   erkannt wird. Echtes "kein Schichtdienst" (Urlaub) wird stattdessen über
   input_boolean.urlaubsmodus_schlafzimmer erkannt - erst dann werden alle
   drei Pläne ausgeschaltet.
-  Nebeneffekt, bewusst in Kauf genommen: an echten freien Tagen ohne
-  Urlaubsmodus bleibt der zuletzt aktive Plan stehen, auch wenn er an diesem
-  Tag nicht gebraucht wird. evcc lädt dadurch ggf. etwas früher auf 100% als
-  nötig - harmlos gegenüber der vorherigen Fehlrichtung (Ladeplan fehlt am
+  Nebeneffekt, bewusst in Kauf genommen und durch die Mo-Fr-Begrenzung der
+  Pläne in evcc selbst entschärft: an echten freien Tagen ohne Urlaubsmodus
+  bleibt der zuletzt aktive Plan stehen, auch wenn er an diesem Tag nicht
+  gebraucht wird. Am Wochenende wirkt sich das aber gar nicht aus, da die
+  Pläne in evcc ohnehin nur Mo-Fr laufen; relevant bleibt nur ein einzelner
+  freier Werktag zwischen zwei Schichten. evcc lädt dort ggf. etwas früher
+  auf 100% als nötig - harmlos gegenüber der vorherigen Fehlrichtung (Ladeplan fehlt am
   Arbeitstag).
 
   EVCC/HA REAGIEREN UNZUVERLÄSSIG - RETRY MIT VERIFIKATION (29.09.2026):
