@@ -28,6 +28,21 @@ description: >
   verliert, welcher Zustand vorher galt. "state" mit from/to kennt dieses
   Problem nicht, weil er stumpf auf den Übergang reagiert statt intern
   "ist gerade an/aus" zu verfolgen.
+
+  NACHLEUCHTZEIT (ergänzt): beim Ausschalten geht nur light.stehlampe erst
+  nach 2 Minuten Verzögerung aus - Schrank-Lichter und light.kugeln sofort,
+  wie bisher. light.stehlampe wird von dieser Automation nicht eingeschaltet
+  (das macht eine externe Automation gekoppelt an light.kugeln), aber das
+  Ausschalten läuft bewusst hier mit, damit die Verzögerung an einer Stelle
+  steht statt dupliziert zu werden.
+
+  mode: restart statt single (ergänzt): mit "single" hätte ein "an"-Trigger
+  während der zweiminütigen Verzögerung gar nicht reagiert - die Automation
+  lief ja noch (im delay), und "single" verwirft neue Trigger währenddessen
+  komplett, statt sie nachzuholen. Genau der Fall, für den die Nachleuchtzeit
+  gedacht ist (kurzes Pausieren/Wiederanschalten), hätte also die Schrank-
+  Lichter nicht wieder angeschaltet. "restart" bricht die laufende
+  Verzögerung stattdessen ab und arbeitet sofort den neuen Trigger ab.
 triggers:
   - trigger: state
     entity_id: media_player.wohnzimmer_apple_tv_wohnzimmer
@@ -89,6 +104,12 @@ actions:
           - action: light.turn_off
             target:
               entity_id: light.kugeln
+          # Nachleuchtzeit - siehe description. Nur die Stehlampe wartet.
+          - delay:
+              minutes: 2
+          - action: light.turn_off
+            target:
+              entity_id: light.stehlampe
       - conditions:
           - condition: trigger
             id: dunkel
@@ -115,4 +136,4 @@ actions:
           - action: light.turn_off
             target:
               entity_id: light.kugeln
-mode: single
+mode: restart

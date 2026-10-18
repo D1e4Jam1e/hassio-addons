@@ -70,6 +70,25 @@ Elevation-Schwelle von exakt 0° kein benannter Standardfall ist (siehe
 Diskussion zu bürgerlicher/nautischer/astronomischer Dämmerung oben) -
 dafür gibt's keine fertige Abkürzung, nur die generische Ebene.
 
+### Nachleuchtzeit für die Stehlampe
+
+Beim Ausschalten geht `light.stehlampe` erst nach 2 Minuten Verzögerung
+aus - die beiden Schrank-Lichter und `light.kugeln` weiterhin sofort.
+`light.stehlampe` wird von dieser Automation nicht eingeschaltet (das
+übernimmt eine externe, nicht in diesem Repo verwaltete Automation gekoppelt
+an `light.kugeln`), aber das verzögerte Ausschalten läuft hier mit statt in
+einer eigenen Automation - sonst müsste die Verzögerung an zwei Stellen
+gepflegt werden.
+
+Dafür musste `mode` von `single` auf `restart` wechseln: mit `single` hätte
+ein "an"-Trigger während der zweiminütigen Verzögerung gar nicht reagiert,
+weil die Automation durch den `delay` noch als laufend galt und `single`
+neue Trigger währenddessen verwirft statt sie nachzuholen. Genau der Fall,
+für den die Nachleuchtzeit gedacht ist (kurzes Pausieren/Wiederanschalten),
+hätte die Schrank-Lichter also nicht wieder angeschaltet. `restart` bricht
+die laufende Verzögerung stattdessen ab und arbeitet sofort den neuen
+Trigger ab.
+
 ## verschattung_west.yaml
 
 ### „HWR fährt zu weit zu" — die Korrektur konnte den Fall nicht sehen
