@@ -45,6 +45,10 @@ description: >
   einmal auf 0% gelandet, konnte ihn diese Automation nie wieder öffnen -
   bei einem Rolladen, für den 0% laut Beschreibung nie zulässig ist. HWR
   wird jetzt auch im Öffnen-Zweig nicht übersprungen.
+  NACHTS NIE ÖFFNEN (ergänzt 01.11.2026): alle Öffnen-Zweige haben die
+  zusätzliche Bedingung sun.sun = above_horizon. Auslöser: Lauf um 18:40 im
+  Dunkeln, bei dem der Bewölkt+kühl-Zweig (nur Bewölkung/Außentemp, keine
+  Tageszeit) Rolladen hochgefahren hat. Schließen ist nicht betroffen.
 triggers:
   - trigger: numeric_state
     entity_id: sensor.sonne_westseite_illuminance_mittelwert
@@ -222,6 +226,11 @@ actions:
                               - Zielposition erneut angefahren.
       - alias: Öffnen - beide Räume gemeinsam
         conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
           - condition: or
             conditions:
               - condition: trigger
