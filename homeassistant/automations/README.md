@@ -202,6 +202,21 @@ selben Moment wieder zuständig und zieht ihn bei Hitze direkt auf
 Verschattungsposition, statt erst beim nächsten 10-Minuten-Zyklus. Das entsperrt
 zugleich die Klimaanlage, die bei geschlossenem Rolladen blockiert ist.
 
+### Ausschlafen am Wochenende
+
+Der Rolladen öffnete am Wochenende vor 09:00. Die Schichterkennung war nicht
+schuld (ihre Grenze ist dort 09:00), sondern diese Automation: die
+Öffnen-Zweige („Schlafzimmer - Öffnen", „Außentemp unter 25°C", „Bewölkt+kühl")
+haben keine Uhrzeitprüfung und laufen alle 10 Minuten. Sie überspringen nur
+`closed` — stand der Rolladen z.B. auf 78% (Klimaanlage) oder 2% (Drift),
+fuhr der nächste Lauf ihn komplett hoch.
+
+`schlafzimmer_gesperrt` gilt jetzt zusätzlich an Sa/So und bei aktivem
+`input_boolean.urlaubsmodus_schlafzimmer`, solange es vor 09:00 ist. Das sperrt
+auch die Schließen-Zweige in dieser Zeit — harmlos, Hitze gibt es um die Uhrzeit
+nicht. Die 09:00-Grenze steht an zwei Stellen (hier und `normal_boundary` in
+der Schichterkennung) und muss bei einer Änderung an beiden nachgezogen werden.
+
 ### Zielpositionen an einer Stelle
 
 Die Zielposition des Schlafzimmers war auf drei Werte verteilt: gefahren wurde
