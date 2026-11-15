@@ -422,7 +422,7 @@ damals auch keine Tageszeitprüfung. Der Trace war am Morgen nicht mehr da
 (HA hält standardmäßig nur 5 Traces).
 
 - „Bewölkt + kühl" und „Außentemp unter 25°C - öffnen" laufen jetzt nur
-  zwischen Sonnenaufgang und Sonnenuntergang. Nach Sonnenaufgang holt der
+  tagsüber (`sun.sun = above_horizon`). Nach Sonnenaufgang holt der
   nächste `periodic_check` das Öffnen nach (höchstens 10 Min. Verzug).
 - Beide schreiben einen Logbuch-Eintrag je Rolladen mit Zweig, Werten und
   Auslöser — aber nur, wenn der Rolladen nicht schon auf 100% steht, sonst
@@ -430,10 +430,12 @@ damals auch keine Tageszeitprüfung. Der Trace war am Morgen nicht mehr da
 - `trace: stored_traces: 100` (statt Standard 5), damit auch eine ganze Nacht
   nachvollziehbar bleibt.
 
-Dieselbe Tageslicht-Bedingung haben auch die vier Öffnen-Zweige nach
-Innentemperatur (Schlafzimmer, Bad, WC, Wohnzimmer+Terrasse) — sie konnten
-nachts ebenfalls öffnen, sobald der Raum unter 21°C lag. Damit öffnet diese
-Automation insgesamt nur noch zwischen Sonnenaufgang und Sonnenuntergang.
+Dieselbe Bedingung haben auch die vier Öffnen-Zweige nach Innentemperatur
+(Schlafzimmer, Bad, WC, Wohnzimmer+Terrasse) — sie konnten nachts ebenfalls
+öffnen, sobald der Raum unter 21°C lag. Damit öffnet diese Automation
+insgesamt nur noch tagsüber. Die Bedingung stammt aus #9; eine zeitgleich
+eingebaute zweite Variante (`condition: sun`) wurde als Doppelung wieder
+entfernt.
 
 ### Zielpositionen an einer Stelle
 
