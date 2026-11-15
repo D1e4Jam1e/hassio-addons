@@ -27,6 +27,12 @@ description: >
   NACHTS NIE ÖFFNEN (ergänzt 01.11.2026): der Öffnen-Zweig hat die
   zusätzliche Bedingung sun.sun = above_horizon. Schließen ist nicht
   betroffen. Das morgendliche Öffnen übernimmt die Zeitsteuerung.
+
+  BLENDSCHUTZ BÜRO (ergänzt 15.11.2026): solange
+  input_boolean.blendschutz_buro an ist (gesetzt von blendschutz_buero.yaml),
+  fasst diese Automation cover.buro in keinem Zweig an - weder Schließen noch
+  Öffnen. Sonst würde sie den Blendschutz (40 %) bei < 90.000 lux wieder
+  aufheben bzw. auf 50 % zurückziehen. cover.gastezimmer ist nicht betroffen.
 triggers:
   - trigger: numeric_state
     entity_id: sensor.sonne_sudseite_illuminance_mittelwert
@@ -77,6 +83,7 @@ actions:
                     - condition: template
                       value_template: |-
                         {{ not is_state(repeat.item.cover, 'closed')
+                           and not (repeat.item.cover == 'cover.buro' and is_state('input_boolean.blendschutz_buro', 'on'))
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
                                  or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - 50) | abs > 5) )
                            and ( (states(repeat.item.temp_sensor) | float(0) > 23)
@@ -131,6 +138,7 @@ actions:
                     - condition: template
                       value_template: |-
                         {{ not is_state(repeat.item, 'closed')
+                           and not (repeat.item == 'cover.buro' and is_state('input_boolean.blendschutz_buro', 'on'))
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item,'current_position') | int(0)) > 80)
                                  or (trigger.id != 'periodic_check' and (state_attr(repeat.item,'current_position') | int(0) - 50) | abs > 5) ) }}
                   then:
@@ -187,7 +195,9 @@ actions:
               sequence:
                 - if:
                     - condition: template
-                      value_template: '{{ not is_state(repeat.item, ''closed'') }}'
+                      value_template: >-
+                        {{ not is_state(repeat.item, 'closed')
+                           and not (repeat.item == 'cover.buro' and is_state('input_boolean.blendschutz_buro', 'on')) }}
                   then:
                     - action: cover.open_cover
                       target:

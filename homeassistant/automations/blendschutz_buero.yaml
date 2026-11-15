@@ -1,0 +1,111 @@
+alias: Blendschutz Büro
+description: >
+  Blendschutz für cover.buro: fährt auf 40 %, wenn die Sonne stark scheint
+  (sensor.sonne_sudseite_illuminance > 60.000 lux, 2 min stabil) UND
+  mindestens einer der beiden PCs läuft (> 50 W). Fährt wieder hoch, wenn die
+  Helligkeit 20 min lang unter 40.000 lux liegt.
+
+  Koordination mit verschattung_sued.yaml (Hitzeverschattung, 50 %):
+    - Abblenden nur, wenn der Rolladen weiter offen ist als 55 % - eine
+      aktive Hitzeverschattung (50 %) oder tiefere Position bleibt unberührt.
+    - input_boolean.blendschutz_buro ist der Merker "Blendschutz aktiv". Solange
+      er an ist, öffnet/verstellt die Hitzeverschattung cover.buro nicht.
+    - Hochfahren nur, wenn der Rolladen noch auf der Blendschutz-Position (40 %)
+      steht; der Merker wird in jedem Fall zurückgesetzt, auch nachts bei
+      Sonnenuntergang (sonst bliebe die Hitzeverschattung für das Büro
+      dauerhaft gesperrt).
+triggers:
+  # Sonne wird stark
+  - trigger: numeric_state
+    entity_id: sensor.sonne_sudseite_illuminance
+    above: 60000
+    for:
+      minutes: 2
+    id: sonne_stark
+  # PC wird eingeschaltet
+  - trigger: numeric_state
+    entity_id:
+      - sensor.marcel_pc_power
+      - sensor.nancy_pc_power
+    above: 50
+    for:
+      minutes: 1
+    id: pc_an
+  # Sonne blendet länger nicht mehr
+  - trigger: numeric_state
+    entity_id: sensor.sonne_sudseite_illuminance
+    below: 40000
+    for:
+      minutes: 20
+    id: sonne_weg
+  # Aufräumen: Merker abends zurücksetzen
+  - trigger: state
+    entity_id: sun.sun
+    to: below_horizon
+    id: nacht
+actions:
+  - choose:
+      # Abblenden
+      - alias: Abblenden
+        conditions:
+          - condition: trigger
+            id:
+              - sonne_stark
+              - pc_an
+          - condition: numeric_state
+            entity_id: sensor.sonne_sudseite_illuminance
+            above: 60000
+          - condition: or
+            conditions:
+              - condition: numeric_state
+                entity_id: sensor.marcel_pc_power
+                above: 50
+              - condition: numeric_state
+                entity_id: sensor.nancy_pc_power
+                above: 50
+          # nur wenn weiter offen als Hitzeverschattung (50 %) + Toleranz
+          - condition: numeric_state
+            entity_id: cover.buro
+            attribute: current_position
+            above: 55
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.blendschutz_buro
+          - action: cover.set_cover_position
+            target:
+              entity_id: cover.buro
+            data:
+              position: 40
+      # Wieder hochfahren
+      - alias: Hochfahren
+        conditions:
+          - condition: trigger
+            id: sonne_weg
+        sequence:
+          # nur wenn der Rolladen noch genau auf der Blendschutz-Position steht
+          - if:
+              - condition: numeric_state
+                entity_id: cover.buro
+                attribute: current_position
+                above: 39
+                below: 41
+            then:
+              - action: cover.set_cover_position
+                target:
+                  entity_id: cover.buro
+                data:
+                  position: 100
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.blendschutz_buro
+      # Merker abends aufräumen
+      - alias: Merker zurücksetzen
+        conditions:
+          - condition: trigger
+            id: nacht
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.blendschutz_buro
+mode: single

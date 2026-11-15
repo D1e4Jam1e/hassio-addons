@@ -12,8 +12,40 @@ Schichterkennung als reinen Konsumenten weiterverwendet:
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
 | `rolladen_wohnzimmer_terrasse.yaml` | Wohnzimmer + Terrasse, Gäste-/Party-Modus, Türkontakt |
+| `blendschutz_buero.yaml` | Blendschutz Büro (40 %) bei starker Sonne + PC an, koordiniert mit `verschattung_sued.yaml` |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
 | `schrankbeleuchtung.yaml` | Schrankbeleuchtung Wohnzimmer, gekoppelt an Apple TV |
+
+## blendschutz_buero.yaml
+
+Blendschutz für `cover.buro`: fährt auf 40 %, wenn `sensor.sonne_sudseite_illuminance`
+2 Minuten lang über 60.000 lux liegt **und** mindestens einer der PCs
+(`sensor.marcel_pc_power`, `sensor.nancy_pc_power`) über 50 W zieht. Ein
+zusätzlicher Trigger auf die PC-Leistung (1 Minute stabil) fängt den Fall ab,
+dass der PC erst nach dem Sonnenanstieg eingeschaltet wird. Hochgefahren
+(100 %) wird, wenn die Helligkeit 20 Minuten unter 40.000 lux liegt
+(Hysterese gegen Wolken).
+
+### Koordination mit `verschattung_sued.yaml`
+
+Beide Automationen fahren `cover.buro`. Ohne Abstimmung hätte die
+Hitzeverschattung den Blendschutz aufgehoben: ihr Öffnen-Zweig fährt bei
+< 90.000 lux und < 25 °C jeden nicht geschlossenen Rolladen komplett auf (auch
+über den 10-Minuten-`periodic_check`), ihr Schließen-Zweig zieht eine Position
+von 40 % wieder auf 50 % zurück.
+
+- **Merker `input_boolean.blendschutz_buro`:** wird beim Abblenden gesetzt,
+  beim Hochfahren und bei Sonnenuntergang zurückgesetzt. Solange er an ist,
+  überspringt `verschattung_sued.yaml` `cover.buro` in allen drei Zweigen.
+  `cover.gastezimmer` ist nicht betroffen.
+- **Abblenden nur über 55 %:** steht der Rolladen schon auf der
+  Hitzeverschattung (50 %) oder tiefer, bleibt er unberührt.
+- **Hochfahren nur bei 40 %:** eine von Hand verstellte Position bleibt
+  erhalten; der Merker wird trotzdem zurückgesetzt.
+
+**Voraussetzung:** Helper `input_boolean.blendschutz_buro` muss existieren
+(*Einstellungen → Geräte & Dienste → Helfer → Hinzufügen → Schalter*). Fehlt
+er, schlägt `input_boolean.turn_on` im Blendschutz fehl.
 
 ## schrankbeleuchtung.yaml
 
