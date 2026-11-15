@@ -1,8 +1,10 @@
 # Home Assistant Automationen
 
-Vier Automationen, die sich `cover.schlafzimmer` und
+Sechs Automationen, die sich `cover.schlafzimmer`, `cover.terrasse` und
+`switch.153931628878753_power` teilen:
+Fünf Automationen, die sich `cover.schlafzimmer` und
 `switch.153931628878753_power` teilen, plus eine unabhängige
-Hysterese-Automation:
+Wohnzimmer-Automation:
 
 | Datei | Rolle |
 | --- | --- |
@@ -11,7 +13,202 @@ Hysterese-Automation:
 | `verschattung_bewoelkt_kuehl_hysterese.yaml` | setzt den Hysterese-Helper für den Bewölkt+kühl-Override |
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
+| `rolladen_wohnzimmer_terrasse.yaml` | Wohnzimmer + Terrasse, Gäste-/Party-Modus, Türkontakt |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
+| `schrankbeleuchtung.yaml` | Schrankbeleuchtung Wohnzimmer, gekoppelt an Apple TV |
+
+## schrankbeleuchtung.yaml
+
+Schaltet die beiden Schrank-Lichter im Wohnzimmer mit
+`media_player.wohnzimmer_apple_tv_wohnzimmer` ein und wieder aus. Beide
+Richtungen in einer Automation statt in getrennten Ein-/Aus-Dateien (wie bei
+der Klimaanlage), weil sich Media Player und Lichter zwischen beiden Zweigen
+nicht unterscheiden - eine zweite Datei hätte nur dieselben Entity-IDs
+dupliziert.
+
+Ein `media_player.turned_off`-Trigger allein hätte die vorhandene
+`light.turn_on`-Aktion erneut ausgelöst, da beide Trigger dieselbe
+Automation auslösen. Die beiden Trigger tragen deshalb IDs (`an`/`aus`), und
+ein `choose` wählt anhand der Trigger-ID zwischen `light.turn_on` und
+`light.turn_off`.
+
+### An/Aus über `state` statt über purpose-specific Trigger (Fix 31.08.)
+
+Ursprünglich liefen An/Aus über `media_player.turned_on`/`turned_off`.
+Traces vom 31.08. zeigten, dass diese Trigger nach dem ersten Auslösen
+aufgehört haben zu feuern: auf 15:13:23/15:13:50 (An/Aus, beide korrekt im
+Trace sichtbar) folgten laut Aktivitätsprotokoll vier weitere echte
+Aus-/Einschaltwechsel des Apple TV (16:51/16:52 und 16:57/16:58 Uhr) - keiner
+davon erzeugte einen Trace, die Automation hat also gar nicht reagiert. Der
+Apple TV durchläuft beim Reconnect kurz Zwischenzustände (`unknown`/`idle`),
+was den purpose-specific Triggern offenbar die Spur verliert, welcher
+Zustand vorher als "aus" galt.
+
+Ersetzt durch den klassischen `state`-Trigger (`from: "off"` für An,
+`to: "off"` für Aus) - der reagiert stumpf auf den Zustandsübergang selbst,
+statt intern eine eigene "ist gerade an/aus"-Logik zu pflegen, und kennt
+das Problem deshalb nicht.
+
+(Der einzige weitere Trace aus dieser Zeit hatte `trigger: null` - eine
+manuelle Ausführung über die UI, bei der kein `trigger.id` gesetzt wird und
+deshalb erwartungsgemäß kein `choose`-Zweig zutrifft. Das ist kein Bug,
+sondern der bereits besprochene Unterschied zwischen "Automatisierung
+ausführen" und einem echten Trigger-Ereignis.)
+
+### light.kugeln nur bei Dunkelheit
+
+Beim Einschalten bekommt `light.kugeln` zusätzlich den Effekt "TV time" -
+aber nur, wenn die Sonne unter dem Horizont steht (`sun.elevation below 0`),
+sonst wird es explizit ausgeschaltet.
+
+Damit das auch nachreagiert, wenn der Apple TV schon läuft und sich
+währenddessen die Tageszeit ändert, gibt es zwei weitere Trigger
+(`dunkel`/`hell`) auf `sun.sun`, Attribut `elevation`, jeweils mit
+Schwelle 0. Beide sind zusätzlich an die Bedingung "Apple TV ist gerade an"
+(`state` von `media_player.wohnzimmer_apple_tv_wohnzimmer` ist nicht `off`)
+gebunden - sonst würde bei jedem Sonnenauf-/-untergang `light.kugeln`
+angefasst, auch wenn gar nicht ferngesehen wird.
+
+`numeric_state` statt eines purpose-specific Triggers, weil eine
+Elevation-Schwelle von exakt 0° kein benannter Standardfall ist (siehe
+Diskussion zu bürgerlicher/nautischer/astronomischer Dämmerung oben) -
+dafür gibt's keine fertige Abkürzung, nur die generische Ebene.
+
+### Nachleuchtzeit für die Stehlampe
+
+Beim Ausschalten geht `light.stehlampe` erst nach 2 Minuten Verzögerung
+aus - die beiden Schrank-Lichter und `light.kugeln` weiterhin sofort.
+`light.stehlampe` wird von dieser Automation nicht eingeschaltet (das
+übernimmt eine externe, nicht in diesem Repo verwaltete Automation gekoppelt
+an `light.kugeln`), aber das verzögerte Ausschalten läuft hier mit statt in
+einer eigenen Automation - sonst müsste die Verzögerung an zwei Stellen
+gepflegt werden.
+
+Dafür musste `mode` von `single` auf `restart` wechseln: mit `single` hätte
+ein "an"-Trigger während der zweiminütigen Verzögerung gar nicht reagiert,
+weil die Automation durch den `delay` noch als laufend galt und `single`
+neue Trigger währenddessen verwirft statt sie nachzuholen. Genau der Fall,
+für den die Nachleuchtzeit gedacht ist (kurzes Pausieren/Wiederanschalten),
+hätte die Schrank-Lichter also nicht wieder angeschaltet. `restart` bricht
+die laufende Verzögerung stattdessen ab und arbeitet sofort den neuen
+Trigger ab.
+
+## rolladen_wohnzimmer_terrasse.yaml
+
+### Die Aussperrsicherung konnte still ausfallen
+
+Jeder Schließ-Zweig wartete per `wait_template` unbegrenzt darauf, dass die
+Terrassentür zugeht. Zusammen mit `mode: restart` war das ein Loch: **jeder**
+neue Trigger bricht einen laufenden Ablauf ab — auch der Trigger „Tür geöffnet".
+
+Ein Sommerabend mit Leuten, die raus- und reingehen, sah damit so aus:
+
+1. Sonnenuntergang → Ablauf startet, Tür ist offen → wartet.
+2. Jemand geht raus → `door_open` feuert → `restart` killt den wartenden Ablauf.
+3. Die Tür geht irgendwann zu — aber es wartet niemand mehr. Der Rolladen bleibt
+   oben.
+4. 23:00 Hard-Limit → wartet ebenfalls → beim nächsten Türöffnen genauso weg.
+
+Dasselbe passierte bei einem Neustart von Home Assistant: das Warten war weg,
+und nachgeholt hat es nichts.
+
+Ersetzt durch zwei Teile ohne Warten:
+
+- **Beim Schließzeitpunkt**: Tür offen → gar nicht erst schließen, nur
+  protokollieren. Tür zu → schließen.
+- **Neuer Trigger „Tür geht zu"** holt das ausgesetzte Schließen nach, sofern
+  die Terrasse zu diesem Zeitpunkt regulär unten wäre. Unabhängig von laufenden
+  Abläufen, übersteht Neustarts.
+
+Der Nachhol-Zweig schließt nebenbei eine zweite Lücke: öffnet jemand nachts um
+02:00 die Terrassentür, fährt der Rolladen hoch — richtig, sonst sperrt man sich
+aus. Bisher blieb er dann bis zum nächsten Sonnenuntergang oben, weil 23:00
+längst vorbei war.
+
+Zeitpunkt-Logik des Nachholens (durchgespielt über Tages- und Modus-Kombinationen):
+
+| Lage | Nachholen |
+| --- | --- |
+| Normal, nach Sonnenuntergang | ja |
+| Gästemodus, ab 20:00 | ja |
+| Party aktiv, vor 23:00 | nein |
+| Party aktiv, nach 23:00 bzw. vor 07:00 | ja |
+| Tagsüber | nein |
+
+Für „ist es dunkel" wird `sun.sun` = `below_horizon` benutzt, nicht
+`condition: sun / after: sunset` — letzteres ist nach Mitternacht falsch, und
+genau dann läuft dieser Zweig.
+
+### Rolladen Terrasse: Aussperrschutz
+
+Beobachtet: der Rolladen fuhr bei *offener* Tür in Verschattungsposition — man
+sitzt draußen und steht vor einem heruntergefahrenen Rolladen.
+
+Der Türkontakt ist **nicht** invertiert. Er überträgt seinen Status aber nicht
+immer. Verpasst er das Öffnen, hält Home Assistant die Tür für zu, der Guard in
+der Verschattung gibt frei, und der Rolladen fährt herunter. Ein Guard, der
+allein an diesem Sensor hängt, kann das prinzipiell nicht verhindern.
+
+Zwei Konsequenzen:
+
+**Der Türkontakt zählt nur noch als „zu", wenn er das ausdrücklich meldet.**
+`unknown`, `unavailable` und ein verpasstes Update gelten als offen. Bei der
+Verschattung kostet diese Fehlerrichtung nur etwas Wärme; beim abendlichen
+Schließen heißt sie, dass der Rolladen oben bleibt, bis der Sensor wieder meldet
+oder von Hand gefahren wird. Das ist der Preis dafür, dass niemand ausgesperrt
+wird.
+
+**Der Party-Schalter sperrt die Terrasse zusätzlich.** `input_boolean.party_terrasse`
+ist damit mehr als der Party-Modus: er ist der „wir sind draußen"-Riegel, und
+die einzige Absicherung, die nicht an der Zuverlässigkeit des Sensors hängt. Für
+längere Aufenthalte draußen ist er der verlässliche Weg.
+
+Wahrheitstabelle der Verschattung für `cover.terrasse` (durchgespielt):
+
+| Türkontakt | Party | Verschattung greift |
+| --- | --- | --- |
+| `off` (zu) | aus | ja |
+| `off` (zu) | an | nein |
+| `on` (offen) | beliebig | nein |
+| `unknown` / `unavailable` | beliebig | nein |
+
+Damit sind alle vier Wege abgedeckt, auf denen die Terrasse zufahren könnte:
+
+| Weg | Absicherung |
+| --- | --- |
+| Regulärer Schließzeitpunkt | Tür + Party |
+| 23:00 Hard-Limit | nur Tür — siehe unten |
+| Verschattung, Zweig „Wohnzimmer + Terrasse" | Tür + Party |
+| Verschattung, Zweig „alle 5 proaktiv" | Tür + Party |
+
+Ein **manuelles** Schließen bei offener Tür bleibt bewusst möglich — eine
+Automation, die das zurückdreht, würde jede Handbedienung bekämpfen.
+
+### Der Party-Schalter ist der „wir sind draußen"-Riegel
+
+`input_boolean.party_terrasse` hebelt jetzt **jedes** automatische Schließen der
+Terrasse aus, auch das 23:00-Limit — gute Partys sind um 23:00 nicht vorbei.
+Zusammen mit der Sperre in der Verschattung ist er damit der einzige Schutz, der
+nicht an der Zuverlässigkeit des Türkontakts hängt.
+
+Damit daraus kein dauerhaft offener Rolladen wird, hängen zwei Gegenstücke dran:
+
+- **Party aus → nachholen.** Ein Trigger auf `party_terrasse` → `off` schließt
+  die Terrasse, sofern der reguläre Zeitpunkt vorbei und die Tür zu ist. Ist die
+  Tür noch offen, übernimmt der „Tür geht zu"-Zweig.
+- **07:00 → Schalter abräumen.** Bleibt er versehentlich an, wäre die Terrasse
+  dauerhaft von Verschattung *und* abendlichem Schließen ausgenommen. Der
+  Morgen-Trigger setzt ihn zurück und schreibt einen Logbuch-Eintrag.
+
+Automatisch geschlossen wird damit nur noch (durchgespielt über Tageszeit ×
+Gästemodus × Party):
+
+| Lage | Schließen |
+| --- | --- |
+| Normal, nach Sonnenuntergang | ja |
+| Gästemodus, ab 20:00 | ja |
+| Party aktiv, zu jeder Zeit | nein |
+| Tagsüber | nein |
 
 ## verschattung_west.yaml
 
@@ -89,7 +286,7 @@ Beides steht in *Entwicklerwerkzeuge → Zustände* beim jeweiligen `cover`:
 Positions-Bit (4).
 
 Ebenfalls prüfen: ob die Entity-IDs den Integrationswechsel überlebt haben. Alle
-fünf Automationen sprechen `cover.schlafzimmer`, `cover.kuche`, `cover.hwr`,
+Automationen sprechen `cover.schlafzimmer`, `cover.kuche`, `cover.hwr`,
 `cover.badezimmer`, `cover.wc`, `cover.wohnzimmer` und `cover.terrasse` direkt
 an — legt die neue Anbindung sie als `..._2` an, laufen die Automationen ins
 Leere, ohne einen Fehler zu werfen.
