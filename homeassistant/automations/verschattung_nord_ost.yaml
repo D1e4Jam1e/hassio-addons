@@ -347,6 +347,11 @@ actions:
                     Zielposition erneut angefahren.
       - alias: Schlafzimmer - Öffnen
         conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
           - condition: or
             conditions:
               - condition: trigger
@@ -438,6 +443,11 @@ actions:
                     Zielposition erneut angefahren.
       - alias: Bad - Öffnen
         conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
           - condition: or
             conditions:
               - condition: trigger
@@ -525,6 +535,11 @@ actions:
                     Zielposition erneut angefahren.
       - alias: WC - Öffnen
         conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
           - condition: or
             conditions:
               - condition: trigger
@@ -614,6 +629,11 @@ actions:
                               - Zielposition erneut angefahren.
       - alias: Wohnzimmer + Terrasse - Öffnen (nach Küchentemperatur)
         conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
           - condition: or
             conditions:
               - condition: trigger
@@ -640,6 +660,11 @@ actions:
                         entity_id: "{{ repeat.item }}"
       - alias: Bewölkt + kühl - alle 5 aktiv öffnen (überstimmt Innentemp)
         conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
           # Bewusst OHNE Trigger-Einschränkung: bewoelkt_kuehl allein
           # entscheidet, unabhängig davon, welcher der zwölf Trigger den
           # Lauf ausgelöst hat. Mit einer Einschränkung auf
@@ -749,6 +774,11 @@ actions:
                               - Zielposition erneut angefahren.
       - alias: Außentemp unter 25°C - öffnen (nur wenn nicht komplett geschlossen)
         conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
           - condition: or
             conditions:
               - condition: trigger

@@ -1,0 +1,196 @@
+alias: Verschattung Süd (Büro + Gäste)
+description: >
+  Sonnenschutz für Südseite (cover.buro, cover.gastezimmer), entkoppelt von der
+  CCA-Zeitsteuerung. Ein gemeinsamer Trigger auf den geglätteten
+  10-Minuten-Mittelwert der Südseiten-Helligkeit.
+
+  Schließen (pro Raum, 50% zu): Helligkeit > 120.000 lux (5 min stabil) UND
+    (Innentemp des jeweiligen Raums > 23°C ODER Außentemp > 23°C ODER
+     Außentemp-1h-Wert > 23°C ODER Vorhersage-Max-Temp heute > 30°C)
+  Öffnen (beide gemeinsam): Helligkeit < 90.000 lux (5 min stabil) UND
+    Außentemp momentan < 25°C UND Außentemp-1h-Wert < 25°C - öffnet nur
+    Rolladen, die aktuell nicht komplett geschlossen (0%) sind.
+
+  Absicherung gegen Positions-Drift (homee), Stand 26.07.2026, nach wiederholten
+  Overshoot-Vorfällen (Schlafzimmer schoss trotz Ziel 50% mehrfach bis auf 0%
+  durch):
+    - Nach jedem set_cover_position wird 20 Sek. gewartet und geprüft, ob
+      der Rolladen trotzdem komplett geschlossen gelandet ist. Falls ja,
+      wird EINMALIG nachkorrigiert.
+    - periodic_check darf nur noch aktiv werden, wenn die aktuelle Position
+      noch deutlich offen ist (>80%) - verhindert, dass der Backup-Trigger
+      denselben driftgefährdeten Fahrbefehl alle 10 Minuten erneut auslöst.
+
+  Proaktiver Vorhersage-Trigger: Löst aus, sobald die aktuelle Außentemperatur
+  25°C übersteigt (5 min stabil) UND die Tagesvorhersage über 30°C liegt.
+
+  NACHTS NIE ÖFFNEN (ergänzt 01.11.2026): der Öffnen-Zweig hat die
+  zusätzliche Bedingung sun.sun = above_horizon. Schließen ist nicht
+  betroffen. Das morgendliche Öffnen übernimmt die Zeitsteuerung.
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.sonne_sudseite_illuminance_mittelwert
+    above: 120000
+    for:
+      minutes: 5
+    id: close
+  - trigger: numeric_state
+    entity_id: sensor.sonne_sudseite_illuminance_mittelwert
+    below: 90000
+    for:
+      minutes: 5
+    id: open
+  - trigger: time_pattern
+    minutes: /10
+    id: periodic_check
+  - trigger: numeric_state
+    entity_id: sensor.wkh_temperature_outside
+    above: 25
+    for:
+      minutes: 5
+    id: forecast_close_all
+conditions: []
+actions:
+  - choose:
+      - alias: Schließen - pro Raum eigene Innentemp prüfen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: close
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.sonne_sudseite_illuminance_mittelwert
+                    above: 120000
+        sequence:
+          - repeat:
+              for_each:
+                - cover: cover.buro
+                  temp_sensor: sensor.klima_buro_temperature
+                - cover: cover.gastezimmer
+                  temp_sensor: sensor.klima_gaste_temperature
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: |-
+                        {{ not is_state(repeat.item.cover, 'closed')
+                           and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - 50) | abs > 5) )
+                           and ( (states(repeat.item.temp_sensor) | float(0) > 23)
+                                 or (states('sensor.wkh_temperature_outside') | float(0) > 23)
+                                 or (states('sensor.wkh_temperature_outside_1h') | float(0) > 23)
+                                 or (states('sensor.vorhersage_max_temp_heute') | float(0) > 30) ) }}
+                  then:
+                    - action: cover.stop_cover
+                      target:
+                        entity_id: '{{ repeat.item.cover }}'
+                    - delay:
+                        seconds: 1
+                    - action: cover.set_cover_position
+                      target:
+                        entity_id: '{{ repeat.item.cover }}'
+                      data:
+                        position: 50
+                    - delay:
+                        seconds: 20
+                    - if:
+                        - condition: template
+                          value_template: '{{ is_state(repeat.item.cover, ''closed'') }}'
+                      then:
+                        - action: cover.set_cover_position
+                          target:
+                            entity_id: '{{ repeat.item.cover }}'
+                          data:
+                            position: 50
+      - alias: Außentemp > 25°C UND Vorhersage > 30°C - proaktiv schließen
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: forecast_close_all
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.wkh_temperature_outside
+                    above: 25
+          - condition: numeric_state
+            entity_id: sensor.vorhersage_max_temp_heute
+            above: 30
+        sequence:
+          - repeat:
+              for_each:
+                - cover.buro
+                - cover.gastezimmer
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: |-
+                        {{ not is_state(repeat.item, 'closed')
+                           and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item,'current_position') | int(0)) > 80)
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item,'current_position') | int(0) - 50) | abs > 5) ) }}
+                  then:
+                    - action: cover.stop_cover
+                      target:
+                        entity_id: '{{ repeat.item }}'
+                    - delay:
+                        seconds: 1
+                    - action: cover.set_cover_position
+                      target:
+                        entity_id: '{{ repeat.item }}'
+                      data:
+                        position: 50
+                    - delay:
+                        seconds: 20
+                    - if:
+                        - condition: template
+                          value_template: '{{ is_state(repeat.item, ''closed'') }}'
+                      then:
+                        - action: cover.set_cover_position
+                          target:
+                            entity_id: '{{ repeat.item }}'
+                          data:
+                            position: 50
+      - alias: Öffnen - beide Räume gemeinsam
+        conditions:
+          # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
+          # davon unberührt.
+          - condition: state
+            entity_id: sun.sun
+            state: above_horizon
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: open
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: periodic_check
+                  - condition: numeric_state
+                    entity_id: sensor.sonne_sudseite_illuminance_mittelwert
+                    below: 90000
+          - condition: numeric_state
+            entity_id: sensor.wkh_temperature_outside
+            below: 25
+          - condition: numeric_state
+            entity_id: sensor.wkh_temperature_outside_1h
+            below: 25
+        sequence:
+          - repeat:
+              for_each:
+                - cover.buro
+                - cover.gastezimmer
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: '{{ not is_state(repeat.item, ''closed'') }}'
+                  then:
+                    - action: cover.open_cover
+                      target:
+                        entity_id: '{{ repeat.item }}'
+mode: restart
+max_exceeded: silent
