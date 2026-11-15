@@ -62,10 +62,11 @@ description: >
     Position 78 durch die Klimaanlage) - und unterliefen so die 09:00-Grenze
     der Schichterkennung.
 
-    NUR TAGSÜBER ÖFFNEN (ergänzt): "Bewölkt + kühl" und "Außentemp unter
-    25°C - öffnen" laufen nur zwischen Sonnenaufgang und Sonnenuntergang
-    (am 15.11. um 03:05 öffnete der Override Bad und WC mitten in der Nacht)
-    und schreiben beim Öffnen einen Logbuch-Eintrag.
+    NUR TAGSÜBER ÖFFNEN (ergänzt): alle Öffnen-Zweige (nach Innentemp.,
+    "Bewölkt + kühl", "Außentemp unter 25°C") laufen nur zwischen
+    Sonnenaufgang und Sonnenuntergang (am 15.11. um 03:05 öffnete der
+    Override Bad und WC mitten in der Nacht). "Bewölkt + kühl" und "Außentemp
+    unter 25°C" schreiben beim Öffnen zusätzlich einen Logbuch-Eintrag.
 
     Bewusst NUR "nacht" als Schichtmodus-Sperre: "spaet" steht von der Abfahrt am frühen Nachmittag
     bis zum nächsten Morgen und würde die Verschattung im halben Tag
@@ -331,6 +332,10 @@ actions:
               - condition: state
                 entity_id: cover.schlafzimmer
                 state: closed
+          # Nur tagsüber - siehe "Bewölkt + kühl".
+          - condition: sun
+            after: sunrise
+            before: sunset
         sequence:
           - action: cover.open_cover
             target:
@@ -418,6 +423,10 @@ actions:
               - condition: state
                 entity_id: cover.badezimmer
                 state: closed
+          # Nur tagsüber - siehe "Bewölkt + kühl".
+          - condition: sun
+            after: sunrise
+            before: sunset
         sequence:
           - action: cover.open_cover
             target:
@@ -505,6 +514,10 @@ actions:
               - condition: state
                 entity_id: cover.wc
                 state: closed
+          # Nur tagsüber - siehe "Bewölkt + kühl".
+          - condition: sun
+            after: sunrise
+            before: sunset
         sequence:
           - action: cover.open_cover
             target:
@@ -591,6 +604,10 @@ actions:
                   - condition: numeric_state
                     entity_id: sensor.klima_kuche_temperature
                     below: 21
+          # Nur tagsüber - siehe "Bewölkt + kühl".
+          - condition: sun
+            after: sunrise
+            before: sunset
         sequence:
           - repeat:
               for_each:

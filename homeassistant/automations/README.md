@@ -233,8 +233,10 @@ damals auch keine Tageszeitprüfung. Der Trace war am Morgen nicht mehr da
 - Empfehlung in HA (nicht im Repo): `trace: stored_traces: 100`, damit auch
   eine ganze Nacht nachvollziehbar bleibt.
 
-Nicht angefasst: die Zweige „Schlafzimmer/Bad/WC/Wohnzimmer+Terrasse - Öffnen"
-nach Innentemperatur haben ebenfalls keine Tageszeitprüfung.
+Dieselbe Tageslicht-Bedingung haben auch die vier Öffnen-Zweige nach
+Innentemperatur (Schlafzimmer, Bad, WC, Wohnzimmer+Terrasse) — sie konnten
+nachts ebenfalls öffnen, sobald der Raum unter 21°C lag. Damit öffnet diese
+Automation insgesamt nur noch zwischen Sonnenaufgang und Sonnenuntergang.
 
 ### Zielpositionen an einer Stelle
 
