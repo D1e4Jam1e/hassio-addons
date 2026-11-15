@@ -62,6 +62,11 @@ description: >
     Position 78 durch die Klimaanlage) - und unterliefen so die 09:00-Grenze
     der Schichterkennung.
 
+    NUR TAGSÜBER ÖFFNEN (ergänzt): "Bewölkt + kühl" und "Außentemp unter
+    25°C - öffnen" laufen nur zwischen Sonnenaufgang und Sonnenuntergang
+    (am 15.11. um 03:05 öffnete der Override Bad und WC mitten in der Nacht)
+    und schreiben beim Öffnen einen Logbuch-Eintrag.
+
     Bewusst NUR "nacht" als Schichtmodus-Sperre: "spaet" steht von der Abfahrt am frühen Nachmittag
     bis zum nächsten Morgen und würde die Verschattung im halben Tag
     aussperren, "frueh" sogar bis 21:30. Beide Fälle brauchen den Schutz
@@ -612,6 +617,13 @@ actions:
           # sofort hochzufahren.
           - condition: template
             value_template: "{{ bewoelkt_kuehl }}"
+          # Nur tagsüber: nachts gibt es nichts zu entschatten. Ohne diese
+          # Bedingung fuhr der Zweig am 15.11. um 03:05 Bad und WC hoch, als
+          # die Bewölkung über 50% stieg. Der nächste periodic_check nach
+          # Sonnenaufgang holt das Öffnen nach (höchstens 10 Min. Verzug).
+          - condition: sun
+            after: sunrise
+            before: sunset
         sequence:
           - repeat:
               for_each:
@@ -632,6 +644,23 @@ actions:
                         {{ not is_state(repeat.item.cover, 'closed')
                            and not (repeat.item.respect_schlafzimmer_lock and schlafzimmer_gesperrt) }}
                   then:
+                    # Nur loggen, wenn wirklich etwas zu öffnen ist - sonst
+                    # käme alle 10 Minuten ein Eintrag je offenem Rolladen.
+                    - if:
+                        - condition: template
+                          value_template: >-
+                            {{ state_attr(repeat.item.cover, 'current_position')
+                               | int(0) < 100 }}
+                      then:
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item.cover }}"
+                            name: Verschattung Nord/Ost
+                            message: >-
+                              Bewölkt+kühl-Override: wird geöffnet (Bewölkung
+                              {{ states('sensor.obersulm_willsbach_bewolkungsgrad') }}%,
+                              Außen {{ states('sensor.wkh_temperature_outside') }}°C,
+                              Auslöser {{ trigger.id }}).
                     - action: cover.open_cover
                       target:
                         entity_id: "{{ repeat.item.cover }}"
@@ -723,6 +752,10 @@ actions:
                   - condition: numeric_state
                     entity_id: sensor.wkh_temperature_outside
                     below: 25
+          # Nur tagsüber, siehe "Bewölkt + kühl".
+          - condition: sun
+            after: sunrise
+            before: sunset
         sequence:
           - repeat:
               for_each:
@@ -739,6 +772,21 @@ actions:
                            and not (repeat.item == 'cover.schlafzimmer'
                                     and schlafzimmer_gesperrt) }}
                   then:
+                    # Nur loggen, wenn wirklich etwas zu öffnen ist.
+                    - if:
+                        - condition: template
+                          value_template: >-
+                            {{ state_attr(repeat.item, 'current_position')
+                               | int(0) < 100 }}
+                      then:
+                        - action: logbook.log
+                          data:
+                            entity_id: "{{ repeat.item }}"
+                            name: Verschattung Nord/Ost
+                            message: >-
+                              Außentemp unter 25°C: wird geöffnet (Außen
+                              {{ states('sensor.wkh_temperature_outside') }}°C,
+                              Auslöser {{ trigger.id }}).
                     - action: cover.open_cover
                       target:
                         entity_id: "{{ repeat.item }}"

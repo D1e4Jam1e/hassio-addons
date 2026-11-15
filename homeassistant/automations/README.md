@@ -217,6 +217,25 @@ auch die Schließen-Zweige in dieser Zeit — harmlos, Hitze gibt es um die Uhrz
 nicht. Die 09:00-Grenze steht an zwei Stellen (hier und `normal_boundary` in
 der Schichterkennung) und muss bei einer Änderung an beiden nachgezogen werden.
 
+### Öffnen nur tagsüber, Logbuch bei jedem Öffnen
+
+Am 15.11. um 03:05 fuhr der Zweig „Bewölkt+kühl" Bad und WC hoch: die Bewölkung
+stieg über 50% (Außen -2°C), der Zweig hat keine Trigger-Einschränkung und
+damals auch keine Tageszeitprüfung. Der Trace war am Morgen nicht mehr da
+(HA hält standardmäßig nur 5 Traces).
+
+- „Bewölkt + kühl" und „Außentemp unter 25°C - öffnen" laufen jetzt nur
+  zwischen Sonnenaufgang und Sonnenuntergang. Nach Sonnenaufgang holt der
+  nächste `periodic_check` das Öffnen nach (höchstens 10 Min. Verzug).
+- Beide schreiben einen Logbuch-Eintrag je Rolladen mit Zweig, Werten und
+  Auslöser — aber nur, wenn der Rolladen nicht schon auf 100% steht, sonst
+  käme alle 10 Minuten ein Eintrag je offenem Rolladen.
+- Empfehlung in HA (nicht im Repo): `trace: stored_traces: 100`, damit auch
+  eine ganze Nacht nachvollziehbar bleibt.
+
+Nicht angefasst: die Zweige „Schlafzimmer/Bad/WC/Wohnzimmer+Terrasse - Öffnen"
+nach Innentemperatur haben ebenfalls keine Tageszeitprüfung.
+
 ### Zielpositionen an einer Stelle
 
 Die Zielposition des Schlafzimmers war auf drei Werte verteilt: gefahren wurde
