@@ -1,0 +1,82 @@
+alias: Verschattung Bewölkt+kühl - Hysterese
+description: >
+  Setzt input_boolean.verschattung_bewoelkt_kuehl_aktiv als Zwischenspeicher
+  für den Bewölkt+kühl-Override in verschattung_nord_ost.yaml. Eigene,
+  kleine Automation statt die Logik direkt dort zu berechnen: ein Template,
+  das bei jedem Lauf frisch ausgewertet wird, kann sich nicht merken, in
+  welchem Zustand es zuletzt war - für eine echte Hysterese (zwei Schwellen
+  statt einer, wie bei der Innentemp-Logik mit Schließen >23°C / Öffnen
+  <21°C) braucht es ein Gedächtnis. Das übernimmt hier dieses input_boolean.
+
+  EIN ab sensor.obersulm_willsbach_bewolkungsgrad > 55%, 5 Min. stabil.
+  AUS ab < 45%, 5 Min. stabil.
+  Dazwischen (45-55%) bleibt der zuletzt gültige Zustand einfach stehen,
+  statt bei jeder kleinen Schwankung umzukippen.
+
+  Ausgelöst durch: mehrfaches Auf-/Zufahren der Nord/Ost-Rolladen innerhalb
+  einer Stunde. Ursache war eine einzelne 50%-Schwelle ohne Puffer in
+  verschattung_nord_ost.yaml - kippte bei jedem Pendeln um die Marke sofort
+  um, und der zugehörige Trigger hatte (anders als alle anderen
+  numeric_state-Trigger dort) keine "for"-Stabilisierung.
+
+  Voraussetzung: Helper input_boolean.verschattung_bewoelkt_kuehl_aktiv muss
+  existieren (Einstellungen -> Geräte & Dienste -> Helfer -> Schalter
+  erstellen, oder als input_boolean: in configuration.yaml).
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.obersulm_willsbach_bewolkungsgrad
+    above: 55
+    for:
+      minutes: 5
+    id: ein
+  - trigger: numeric_state
+    entity_id: sensor.obersulm_willsbach_bewolkungsgrad
+    below: 45
+    for:
+      minutes: 5
+    id: aus
+  # Sync bei HA-Neustart: ohne diesen Trigger würde das input_boolean nach
+  # einem Neustart in seinem letzten (ggf. veralteten) Zustand verharren,
+  # bis die nächste Schwellenüberschreitung kommt - kann je nach Wetterlage
+  # Stunden dauern.
+  - trigger: homeassistant
+    event: start
+    id: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: ein
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.verschattung_bewoelkt_kuehl_aktiv
+      - conditions:
+          - condition: trigger
+            id: aus
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.verschattung_bewoelkt_kuehl_aktiv
+      - conditions:
+          - condition: trigger
+            id: start
+          - condition: numeric_state
+            entity_id: sensor.obersulm_willsbach_bewolkungsgrad
+            above: 55
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.verschattung_bewoelkt_kuehl_aktiv
+      - conditions:
+          - condition: trigger
+            id: start
+          - condition: numeric_state
+            entity_id: sensor.obersulm_willsbach_bewolkungsgrad
+            below: 45
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.verschattung_bewoelkt_kuehl_aktiv
+mode: single
