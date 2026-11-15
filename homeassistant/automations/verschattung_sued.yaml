@@ -15,8 +15,11 @@ description: >
   Overshoot-Vorfällen (Schlafzimmer schoss trotz Ziel 50% mehrfach bis auf 0%
   durch):
     - Nach jedem set_cover_position wird 20 Sek. gewartet und geprüft, ob
-      der Rolladen trotzdem komplett geschlossen gelandet ist. Falls ja,
-      wird EINMALIG nachkorrigiert.
+      der Rolladen zu weit zugefahren ist. Falls ja, wird EINMALIG
+      nachkorrigiert. GEÄNDERT: geprüft wird die tatsächliche Position gegen
+      die Zielposition (Toleranz "drift_toleranz"), nicht mehr nur "ganz
+      zu" - ein Überfahren auf z.B. 25% hat den State "open" und blieb
+      vorher unbemerkt. Jede Korrektur steht im Logbuch.
     - periodic_check darf nur noch aktiv werden, wenn die aktuelle Position
       noch deutlich offen ist (>80%) - verhindert, dass der Backup-Trigger
       denselben driftgefährdeten Fahrbefehl alle 10 Minuten erneut auslöst.
@@ -51,6 +54,14 @@ triggers:
     id: forecast_close_all
 conditions: []
 actions:
+  - variables:
+      # Zielposition beim Verschatten - EINZIGE Stelle, an der sie steht.
+      positionen:
+        cover.buro: 50
+        cover.gastezimmer: 50
+      # Wie weit darf die tatsächliche Position unter der Zielposition liegen,
+      # bevor nachkorrigiert wird.
+      drift_toleranz: 5
   - choose:
       - alias: Schließen - pro Raum eigene Innentemp prüfen
         conditions:
@@ -78,7 +89,7 @@ actions:
                       value_template: |-
                         {{ not is_state(repeat.item.cover, 'closed')
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0)) > 80)
-                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - 50) | abs > 5) )
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item.cover,'current_position') | int(0) - positionen[repeat.item.cover]) | abs > 5) )
                            and ( (states(repeat.item.temp_sensor) | float(0) > 23)
                                  or (states('sensor.wkh_temperature_outside') | float(0) > 23)
                                  or (states('sensor.wkh_temperature_outside_1h') | float(0) > 23)
@@ -93,18 +104,33 @@ actions:
                       target:
                         entity_id: '{{ repeat.item.cover }}'
                       data:
-                        position: 50
+                        position: "{{ positionen[repeat.item.cover] }}"
                     - delay:
                         seconds: 20
+                    # Zu weit zugefahren? Nicht nur "ganz zu" - siehe
+                    # description.
                     - if:
                         - condition: template
-                          value_template: '{{ is_state(repeat.item.cover, ''closed'') }}'
+                          value_template: >-
+                            {{ is_state(repeat.item.cover, 'closed')
+                               or (state_attr(repeat.item.cover, 'current_position') is not none
+                                      and state_attr(repeat.item.cover, 'current_position') | int(0)
+                                          < positionen[repeat.item.cover] - drift_toleranz) }}
                       then:
                         - action: cover.set_cover_position
                           target:
                             entity_id: '{{ repeat.item.cover }}'
                           data:
-                            position: 50
+                            position: "{{ positionen[repeat.item.cover] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: '{{ repeat.item.cover }}'
+                            name: Verschattung Süd
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item.cover] }}%, tatsächlich
+                              {{ state_attr(repeat.item.cover,'current_position') }}%)
+                              - Zielposition erneut angefahren.
       - alias: Außentemp > 25°C UND Vorhersage > 30°C - proaktiv schließen
         conditions:
           - condition: or
@@ -132,7 +158,7 @@ actions:
                       value_template: |-
                         {{ not is_state(repeat.item, 'closed')
                            and ( (trigger.id == 'periodic_check' and (state_attr(repeat.item,'current_position') | int(0)) > 80)
-                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item,'current_position') | int(0) - 50) | abs > 5) ) }}
+                                 or (trigger.id != 'periodic_check' and (state_attr(repeat.item,'current_position') | int(0) - positionen[repeat.item]) | abs > 5) ) }}
                   then:
                     - action: cover.stop_cover
                       target:
@@ -143,18 +169,31 @@ actions:
                       target:
                         entity_id: '{{ repeat.item }}'
                       data:
-                        position: 50
+                        position: "{{ positionen[repeat.item] }}"
                     - delay:
                         seconds: 20
                     - if:
                         - condition: template
-                          value_template: '{{ is_state(repeat.item, ''closed'') }}'
+                          value_template: >-
+                            {{ is_state(repeat.item, 'closed')
+                               or (state_attr(repeat.item, 'current_position') is not none
+                                      and state_attr(repeat.item, 'current_position') | int(0)
+                                          < positionen[repeat.item] - drift_toleranz) }}
                       then:
                         - action: cover.set_cover_position
                           target:
                             entity_id: '{{ repeat.item }}'
                           data:
-                            position: 50
+                            position: "{{ positionen[repeat.item] }}"
+                        - action: logbook.log
+                          data:
+                            entity_id: '{{ repeat.item }}'
+                            name: Verschattung Süd
+                            message: >-
+                              Positions-Drift erkannt (Ziel
+                              {{ positionen[repeat.item] }}%, tatsächlich
+                              {{ state_attr(repeat.item,'current_position') }}%)
+                              - Zielposition erneut angefahren.
       - alias: Öffnen - beide Räume gemeinsam
         conditions:
           # Nachts nie öffnen (Sonne unter dem Horizont) - Schließen bleibt
@@ -192,5 +231,10 @@ actions:
                     - action: cover.open_cover
                       target:
                         entity_id: '{{ repeat.item }}'
-mode: restart
+# queued statt restart: die Drift-Korrektur wartet 20 Sekunden und prüft dann
+# nach. Bei "restart" bricht jeder in dieser Zeit feuernde Trigger den Lauf ab -
+# also genau die Korrektur, um die es hier geht. Bei zwei Rolladen nacheinander
+# dauert ein Durchlauf über 40 Sekunden.
+mode: queued
+max: 5
 max_exceeded: silent
