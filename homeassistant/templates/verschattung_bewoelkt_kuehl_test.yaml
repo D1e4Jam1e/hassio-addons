@@ -1,0 +1,54 @@
+# Test-Sensor für den historischen Vergleich der "bewoelkt_kuehl"-Erkennung
+# aus verschattung_nord_ost.yaml (Automation) gegen die vorhandenen
+# Helligkeitssensoren (West, Süd) - bewusst NICHT in die Automation
+# eingebunden, nur zur Beobachtung über History/Logbuch.
+#
+# Bildet exakt dieselbe Formel wie die Variable "bewoelkt_kuehl" in
+# verschattung_nord_ost.yaml ab. Ändert sich dort die Entity-ID oder die
+# Schwelle, muss das hier von Hand nachgezogen werden - keine gemeinsame
+# Quelle, da Home Assistant keine automationsübergreifenden Variablen kennt
+# (siehe README, Abschnitt "Bekannte Kopplung").
+#
+# Auswertung: Entwicklerwerkzeuge -> Historie, binary_sensor.verschattung_
+# bewoelkt_kuehl_test zusammen mit den Rohwert-Helligkeitssensoren (Süd:
+# sensor.sonne_sudseite_illuminance, West: sensor.sonne_westseite_illuminance
+# - bewusst die Rohwerte statt der geglätteten *_mittelwert-Sensoren, da es
+# hier nur um einen visuellen Abgleich geht) bzw. dem Kombi-Sensor unten
+# auswählen und die An/Aus-Phasen gegen die Helligkeitskurven abgleichen. Da
+# die Helligkeitssensoren richtungsabhängig sind (Süd/West reagieren auf den
+# Sonnenstand, nicht nur auf Bewölkung), ist der Abgleich nur in den
+# Tagesstunden aussagekräftig, in denen bei klarem Himmel tatsächlich
+# direkte Sonne auf den jeweiligen Sensor treffen würde.
+#
+# Einbinden entweder als eigener Eintrag unter der "template:"-Sektion in
+# configuration.yaml (dann mit "- " vor "binary_sensor:"/"sensor:" einrücken,
+# falls dort schon eine Liste existiert) oder über die UI: Einstellungen ->
+# Geräte & Dienste -> Hilfsbereich -> Vorlage.
+template:
+  - binary_sensor:
+      - name: "Verschattung Nord/Ost - Bewölkt+kühl (Test)"
+        unique_id: verschattung_bewoelkt_kuehl_test
+        state: >
+          {{ states('sensor.obersulm_willsbach_bewolkungsgrad') | float(0) > 50
+             and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
+        attributes:
+          bewolkungsgrad: "{{ states('sensor.obersulm_willsbach_bewolkungsgrad') }}"
+          aussentemp: "{{ states('sensor.wkh_temperature_outside') }}"
+  # Süd und West stehen laut Beobachtung 90° zueinander - kombiniert deckt
+  # das mehr vom Tag ab als jeder Sensor einzeln, da bei Bewölkung beide
+  # gleichzeitig einbrechen, bei Klarheit aber nur der gerade "angestrahlte"
+  # hoch ausschlägt. Max() statt Mittelwert, damit der jeweilige Peak nicht
+  # künstlich halbiert wird. Deckt den Vormittag (vor Süd-Peak) weiterhin
+  # nicht ab.
+  - sensor:
+      - name: "Sonne Süd/West - Maximum (Test)"
+        unique_id: verschattung_sonne_sued_west_max_test
+        unit_of_measurement: "lx"
+        device_class: illuminance
+        state_class: measurement
+        state: >
+          {{ [states('sensor.sonne_sudseite_illuminance') | float(0),
+              states('sensor.sonne_westseite_illuminance') | float(0)] | max }}
+        attributes:
+          sued: "{{ states('sensor.sonne_sudseite_illuminance') }}"
+          west: "{{ states('sensor.sonne_westseite_illuminance') }}"

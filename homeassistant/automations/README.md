@@ -2,15 +2,95 @@
 
 Sechs Automationen, die sich `cover.schlafzimmer`, `cover.terrasse` und
 `switch.153931628878753_power` teilen:
+Fünf Automationen, die sich `cover.schlafzimmer` und
+`switch.153931628878753_power` teilen, plus eine unabhängige
+Wohnzimmer-Automation:
 
 | Datei | Rolle |
 | --- | --- |
 | `rolladen_schlafzimmer_schichterkennung.yaml` | Schichterkennung, Tagschlaf, Sonnenauf-/-untergang |
-| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume |
+| `verschattung_nord_ost.yaml` | temperaturbasierter Sonnenschutz, 5 Räume, mit Bewölkt+kühl-Override |
 | `klima_schlafzimmer_ein.yaml` | Klimagerät ein |
 | `klima_schlafzimmer_aus.yaml` | Klimagerät aus |
 | `rolladen_wohnzimmer_terrasse.yaml` | Wohnzimmer + Terrasse, Gäste-/Party-Modus, Türkontakt |
 | `verschattung_west.yaml` | helligkeitsbasierter Sonnenschutz, Küche + HWR |
+| `schrankbeleuchtung.yaml` | Schrankbeleuchtung Wohnzimmer, gekoppelt an Apple TV |
+
+## schrankbeleuchtung.yaml
+
+Schaltet die beiden Schrank-Lichter im Wohnzimmer mit
+`media_player.wohnzimmer_apple_tv_wohnzimmer` ein und wieder aus. Beide
+Richtungen in einer Automation statt in getrennten Ein-/Aus-Dateien (wie bei
+der Klimaanlage), weil sich Media Player und Lichter zwischen beiden Zweigen
+nicht unterscheiden - eine zweite Datei hätte nur dieselben Entity-IDs
+dupliziert.
+
+Ein `media_player.turned_off`-Trigger allein hätte die vorhandene
+`light.turn_on`-Aktion erneut ausgelöst, da beide Trigger dieselbe
+Automation auslösen. Die beiden Trigger tragen deshalb IDs (`an`/`aus`), und
+ein `choose` wählt anhand der Trigger-ID zwischen `light.turn_on` und
+`light.turn_off`.
+
+### An/Aus über `state` statt über purpose-specific Trigger (Fix 31.08.)
+
+Ursprünglich liefen An/Aus über `media_player.turned_on`/`turned_off`.
+Traces vom 31.08. zeigten, dass diese Trigger nach dem ersten Auslösen
+aufgehört haben zu feuern: auf 15:13:23/15:13:50 (An/Aus, beide korrekt im
+Trace sichtbar) folgten laut Aktivitätsprotokoll vier weitere echte
+Aus-/Einschaltwechsel des Apple TV (16:51/16:52 und 16:57/16:58 Uhr) - keiner
+davon erzeugte einen Trace, die Automation hat also gar nicht reagiert. Der
+Apple TV durchläuft beim Reconnect kurz Zwischenzustände (`unknown`/`idle`),
+was den purpose-specific Triggern offenbar die Spur verliert, welcher
+Zustand vorher als "aus" galt.
+
+Ersetzt durch den klassischen `state`-Trigger (`from: "off"` für An,
+`to: "off"` für Aus) - der reagiert stumpf auf den Zustandsübergang selbst,
+statt intern eine eigene "ist gerade an/aus"-Logik zu pflegen, und kennt
+das Problem deshalb nicht.
+
+(Der einzige weitere Trace aus dieser Zeit hatte `trigger: null` - eine
+manuelle Ausführung über die UI, bei der kein `trigger.id` gesetzt wird und
+deshalb erwartungsgemäß kein `choose`-Zweig zutrifft. Das ist kein Bug,
+sondern der bereits besprochene Unterschied zwischen "Automatisierung
+ausführen" und einem echten Trigger-Ereignis.)
+
+### light.kugeln nur bei Dunkelheit
+
+Beim Einschalten bekommt `light.kugeln` zusätzlich den Effekt "TV time" -
+aber nur, wenn die Sonne unter dem Horizont steht (`sun.elevation below 0`),
+sonst wird es explizit ausgeschaltet.
+
+Damit das auch nachreagiert, wenn der Apple TV schon läuft und sich
+währenddessen die Tageszeit ändert, gibt es zwei weitere Trigger
+(`dunkel`/`hell`) auf `sun.sun`, Attribut `elevation`, jeweils mit
+Schwelle 0. Beide sind zusätzlich an die Bedingung "Apple TV ist gerade an"
+(`state` von `media_player.wohnzimmer_apple_tv_wohnzimmer` ist nicht `off`)
+gebunden - sonst würde bei jedem Sonnenauf-/-untergang `light.kugeln`
+angefasst, auch wenn gar nicht ferngesehen wird.
+
+`numeric_state` statt eines purpose-specific Triggers, weil eine
+Elevation-Schwelle von exakt 0° kein benannter Standardfall ist (siehe
+Diskussion zu bürgerlicher/nautischer/astronomischer Dämmerung oben) -
+dafür gibt's keine fertige Abkürzung, nur die generische Ebene.
+
+### Nachleuchtzeit für die Stehlampe
+
+Beim Ausschalten geht `light.stehlampe` erst nach 2 Minuten Verzögerung
+aus - die beiden Schrank-Lichter und `light.kugeln` weiterhin sofort.
+`light.stehlampe` wird von dieser Automation nicht eingeschaltet (das
+übernimmt eine externe, nicht in diesem Repo verwaltete Automation gekoppelt
+an `light.kugeln`), aber das verzögerte Ausschalten läuft hier mit statt in
+einer eigenen Automation - sonst müsste die Verzögerung an zwei Stellen
+gepflegt werden.
+
+Dafür musste `mode` von `single` auf `restart` wechseln: mit `single` hätte
+ein "an"-Trigger während der zweiminütigen Verzögerung gar nicht reagiert,
+weil die Automation durch den `delay` noch als laufend galt und `single`
+neue Trigger währenddessen verwirft statt sie nachzuholen. Genau der Fall,
+für den die Nachleuchtzeit gedacht ist (kurzes Pausieren/Wiederanschalten),
+hätte die Schrank-Lichter also nicht wieder angeschaltet. `restart` bricht
+die laufende Verzögerung stattdessen ab und arbeitet sofort den neuen
+Trigger ab.
 
 ## rolladen_wohnzimmer_terrasse.yaml
 
@@ -288,8 +368,9 @@ nachgezogen werden. In beiden Dateien vermerkt.
 
 ## verschattung_nord_ost.yaml
 
-Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume. Hier liegt sie,
-weil sie sich mit der Schichterkennung denselben Rolladen teilt.
+Temperaturbasierter Sonnenschutz für die fünf Nord-/Ost-Räume, seit 22.08.2026
+mit Bewölkt+kühl-Override (siehe unten). Hier liegt sie, weil sie sich mit der
+Schichterkennung denselben Rolladen teilt.
 
 ### Koordination mit der Schichterkennung
 
@@ -346,10 +427,130 @@ Das Schlafzimmer landet damit auch im „alle 5"-Zweig auf 78 statt auf 50.
 ### `mode: queued` statt `restart`
 
 Die Drift-Korrektur wartet 20 Sekunden und prüft dann nach. Bei `restart` bricht
-jeder in dieser Zeit feuernde der elf Trigger den Lauf ab — also genau die
+jeder in dieser Zeit feuernde der zwölf Trigger den Lauf ab — also genau die
 Korrektur, die nach dem Overshoot vom 26.07. gebaut wurde. Vertretbar, weil
 Temperaturen träge sind: auf der Nordseite kommt die Sonne höchstens abends kurz
 vorbei, dicht aufeinanderfolgende Trigger sind nicht zu erwarten. `max: 5`.
+
+### Bewölkt + kühl überstimmt die Innentemp (22.08.2026)
+
+Beobachtet: bei Regen und kühlem Wetter verschattete die Automation trotzdem,
+obwohl auf der Nord-/Ostseite gar keine Sonne zum Blocken da ist. Ursache: die
+fünf Räume hängen **ausschließlich** an ihrem Innentemp-Sensor (siehe
+Beschreibung oben — bewusst kein Helligkeits-, Außentemp- oder
+Vorhersage-Faktor). Steigt die Innentemp durch interne Wärmequellen (Kochen,
+Elektronik, Personen) über 23°C, schließt die Automation auch dann, wenn
+draußen keine nennenswerte Sonne durchkommt — das Verschatten bringt in dem
+Moment nichts, es verdunkelt den Raum nur unnötig.
+
+Variable `bewoelkt_kuehl` (finaler Stand nach drei Korrekturen, siehe unten):
+
+```jinja
+{{ states('sensor.obersulm_willsbach_bewolkungsgrad') | float(0) > 50
+   and states('sensor.wkh_temperature_outside') | float(100) < 23 }}
+```
+
+Solange sie zutrifft:
+
+- blockieren alle vier Schließen-Zweige (zusätzliche Bedingung
+  `not bewoelkt_kuehl`) — es wird nicht neu verschattet;
+- fährt ein neuer, eigener Zweig **aktiv** alle 5 Rolladen wieder hoch, auch
+  wenn die jeweilige Innentemp noch über der 21°C-Öffnen-Schwelle liegt. Das
+  ist der einzige Zweig der Automation, der Innentemp bewusst überstimmt.
+  Respektiert dabei dieselben Ausnahmen wie die bestehenden Öffnen-Zweige:
+  Schlafzimmer bleibt bei Schichtmodus `nacht` unangetastet, bereits
+  komplett geschlossene Rolladen (state `closed`) werden übersprungen.
+
+Der proaktive „Außentemp > 25°C UND Vorhersage > 25°C"-Zweig braucht keine
+eigene Ausnahme dafür: Außentemp > 25°C und < 23°C schließen sich gegenseitig
+aus.
+
+#### Korrektur 1: Rolladen fuhren trotz erfüllter Override-Bedingung nicht hoch
+
+Im Test aufgefallen (Trace zeigte die Override-Variable als `true`, aber
+keine Aktion): der Öffnen-Zweig hatte anfangs zusätzlich eine
+Trigger-Einschränkung (`trigger.id` musste einem bestimmten Trigger
+entsprechen). Löste stattdessen einer der Innentemp-Trigger aus — z.B.
+`wz_terrasse_close`, weil die Küchentemperatur über 23°C stieg — blockierte
+das zwar korrekt den zugehörigen Schließen-Zweig, aber der Öffnen-Zweig
+matchte wegen der Trigger-Einschränkung ebenfalls nicht. Kein `choose`-Zweig
+traf zu, die Rolladen blieben stehen, bis der nächste `periodic_check` (bis
+zu 10 Min. später) kam.
+
+Die Trigger-Einschränkung ist jetzt entfernt — die Override-Variable allein
+entscheidet, unabhängig davon, welcher der zwölf Trigger den Lauf ausgelöst
+hat. Der Zweig reagiert damit sofort, egal von welchem Trigger die Auswertung
+angestoßen wurde.
+
+#### Korrektur 2: `weather.forecast_home` war als Kriterium ungeeignet
+
+Ursprünglich stand hier eine Bedingung auf `weather.forecast_home` (Met.no):
+`in [rainy, pouring, lightning-rainy]`, später erweitert um `cloudy`/
+`partlycloudy`. Im Betrieb weiter beobachtet: die Nord-/Ost-Räume
+verschatteten weiterhin, obwohl es draußen den ganzen Tag nie wärmer als
+knapp 23°C wurde. Zwei Traces (15:00 und 15:10 Uhr) zeigten die
+Override-Variable als `false` — der Override griff also gar nicht erst.
+
+Ursache, per Verlaufsdaten von `weather.forecast_home` und
+`sensor.wkh_temperature_outside` nachvollzogen:
+
+- `weather.forecast_home` ist ein **Momentan-Zustand**, kein Tagesmuster. Am
+  fraglichen Tag wechselte er mehrmals stündlich: `rainy` (11:54) →
+  `partlycloudy` (12:57) → `sunny` (15:03) → ... Um 15:00/15:10 Uhr stand er
+  auf `partlycloudy` — nicht in der ursprünglichen Zustandsliste.
+- `sensor.wkh_temperature_outside` lag zur gleichen Zeit bei ca. 21–22°C,
+  also unter der Temperaturschwelle. Die reine Temperaturbedingung hätte den
+  Fall also korrekt erkannt — die UND-Verknüpfung mit der volatilen
+  Wetter-Kategorie hat es verhindert.
+
+Kurz danach zusätzlich beobachtet: `weather.forecast_home` zeigte `sunny`,
+während es tatsächlich bewölkt war — der Zustand ist offenbar modellbasiert
+(Vorhersage fürs aktuelle Stündchen), keine echte Beobachtung, und kann daran
+vorbeiliegen.
+
+#### Korrektur 3: Umstieg auf DWD-Bewölkungsgrad (numerisch statt Kategorie)
+
+`weather.forecast_home` komplett ersetzt durch
+`sensor.obersulm_willsbach_bewolkungsgrad` — eine DWD-Stationsmessung
+(Deutscher Wetterdienst, HACS-Integration
+[FL550/dwd_weather](https://github.com/FL550/dwd_weather)) statt einer
+Modell-Zustandskategorie. Ein numerischer Prozentwert lässt sich nicht in
+eine falsche Kategorie einsortieren und ist nicht auf eine feste Werteliste
+angewiesen — deckt automatisch auch andere Fälle als „Regen" ab, z.B. dichte,
+aber trockene Bewölkung.
+
+Schwelle zunächst mit 75% angesetzt, angelehnt an die grobe meteorologische
+Einteilung „stark bewölkt bis bedeckt" (6–8 Achtel). Noch am selben Tag per
+Live-Abgleich korrigiert: bei einem abgelesenen Wert von 53% wurde der Himmel
+bereits als „ziemlich zu" beschrieben — 75% wäre also viel zu träge gewesen
+und hätte den ursprünglichen Fall kaum noch abgedeckt. Endgültige Schwelle:
+**50%**.
+
+Trigger `bewoelkt_kuehl_open` entsprechend von einem `state`-Trigger auf
+`weather.forecast_home` zu einem `numeric_state`-Trigger auf
+`sensor.obersulm_willsbach_bewolkungsgrad` (`above: 50`) geändert, damit die
+Automation beim Überschreiten der Schwelle sofort neu auswertet statt bis zu
+10 Minuten auf den nächsten `periodic_check` zu warten.
+
+Variable und Trigger von `regen_kuehl`/`regen_kuehl_open` in
+`bewoelkt_kuehl`/`bewoelkt_kuehl_open` umbenannt — „Regen" war nie das
+eigentliche Kriterium, sondern fehlende direkte Sonne.
+
+**Falls die Station wechselt oder die Integration neu eingerichtet wird:**
+`sensor.obersulm_willsbach_bewolkungsgrad` ist stations- bzw.
+konfigurationsspezifisch benannt (Station „Obersulm-Willsbach", Q242) — bei
+einer anderen DWD-Station oder einer neu aufgesetzten Integration muss die
+Entity-ID in der Variable `bewoelkt_kuehl` und im Trigger
+`bewoelkt_kuehl_open` angepasst werden (*Entwicklerwerkzeuge → Zustände*
+prüfen).
+
+**Kalibrierung der 50%-Schwelle:** wie gut die DWD-Stationsmessung die
+tatsächlichen Lichtverhältnisse am Haus trifft, ist bisher nur an einem
+einzelnen Live-Abgleich (53% ≈ „ziemlich zu") festgemacht. Für einen
+belastbareren Abgleich über mehrere Tage gegen die vorhandenen
+Helligkeitssensoren (West, Süd) siehe
+`../templates/verschattung_bewoelkt_kuehl_test.yaml` — ein eigenständiger
+Test-Sensor, bewusst nicht in diese Automation eingebunden.
 
 
 ## rolladen_schlafzimmer_schichterkennung.yaml
