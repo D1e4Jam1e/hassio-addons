@@ -399,6 +399,42 @@ selben Moment wieder zuständig und zieht ihn bei Hitze direkt auf
 Verschattungsposition, statt erst beim nächsten 10-Minuten-Zyklus. Das entsperrt
 zugleich die Klimaanlage, die bei geschlossenem Rolladen blockiert ist.
 
+### Ausschlafen am Wochenende
+
+Der Rolladen öffnete am Wochenende vor 09:00. Die Schichterkennung war nicht
+schuld (ihre Grenze ist dort 09:00), sondern diese Automation: die
+Öffnen-Zweige („Schlafzimmer - Öffnen", „Außentemp unter 25°C", „Bewölkt+kühl")
+haben keine Uhrzeitprüfung und laufen alle 10 Minuten. Sie überspringen nur
+`closed` — stand der Rolladen z.B. auf 78% (Klimaanlage) oder 2% (Drift),
+fuhr der nächste Lauf ihn komplett hoch.
+
+`schlafzimmer_gesperrt` gilt jetzt zusätzlich an Sa/So und bei aktivem
+`input_boolean.urlaubsmodus_schlafzimmer`, solange es vor 09:00 ist. Das sperrt
+auch die Schließen-Zweige in dieser Zeit — harmlos, Hitze gibt es um die Uhrzeit
+nicht. Die 09:00-Grenze steht an zwei Stellen (hier und `normal_boundary` in
+der Schichterkennung) und muss bei einer Änderung an beiden nachgezogen werden.
+
+### Öffnen nur tagsüber, Logbuch bei jedem Öffnen
+
+Am 15.11. um 03:05 fuhr der Zweig „Bewölkt+kühl" Bad und WC hoch: die Bewölkung
+stieg über 50% (Außen -2°C), der Zweig hat keine Trigger-Einschränkung und
+damals auch keine Tageszeitprüfung. Der Trace war am Morgen nicht mehr da
+(HA hält standardmäßig nur 5 Traces).
+
+- „Bewölkt + kühl" und „Außentemp unter 25°C - öffnen" laufen jetzt nur
+  zwischen Sonnenaufgang und Sonnenuntergang. Nach Sonnenaufgang holt der
+  nächste `periodic_check` das Öffnen nach (höchstens 10 Min. Verzug).
+- Beide schreiben einen Logbuch-Eintrag je Rolladen mit Zweig, Werten und
+  Auslöser — aber nur, wenn der Rolladen nicht schon auf 100% steht, sonst
+  käme alle 10 Minuten ein Eintrag je offenem Rolladen.
+- `trace: stored_traces: 100` (statt Standard 5), damit auch eine ganze Nacht
+  nachvollziehbar bleibt.
+
+Dieselbe Tageslicht-Bedingung haben auch die vier Öffnen-Zweige nach
+Innentemperatur (Schlafzimmer, Bad, WC, Wohnzimmer+Terrasse) — sie konnten
+nachts ebenfalls öffnen, sobald der Raum unter 21°C lag. Damit öffnet diese
+Automation insgesamt nur noch zwischen Sonnenaufgang und Sonnenuntergang.
+
 ### Zielpositionen an einer Stelle
 
 Die Zielposition des Schlafzimmers war auf drei Werte verteilt: gefahren wurde
