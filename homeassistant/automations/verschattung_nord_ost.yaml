@@ -813,6 +813,10 @@ actions:
 # wurde. Vertretbar, weil Temperaturen träge sind: auf der Nordseite kommt die
 # Sonne höchstens abends kurz vorbei, dicht aufeinanderfolgende Trigger sind
 # also nicht zu erwarten.
+# 100 statt der Standard-5 Traces: der periodic_check läuft alle 10 Minuten,
+# bis zum Morgen wäre ein nächtlicher Lauf sonst längst verdrängt.
+trace:
+  stored_traces: 100
 mode: queued
 max: 5
 max_exceeded: silent

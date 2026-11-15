@@ -230,8 +230,8 @@ damals auch keine Tageszeitprüfung. Der Trace war am Morgen nicht mehr da
 - Beide schreiben einen Logbuch-Eintrag je Rolladen mit Zweig, Werten und
   Auslöser — aber nur, wenn der Rolladen nicht schon auf 100% steht, sonst
   käme alle 10 Minuten ein Eintrag je offenem Rolladen.
-- Empfehlung in HA (nicht im Repo): `trace: stored_traces: 100`, damit auch
-  eine ganze Nacht nachvollziehbar bleibt.
+- `trace: stored_traces: 100` (statt Standard 5), damit auch eine ganze Nacht
+  nachvollziehbar bleibt.
 
 Dieselbe Tageslicht-Bedingung haben auch die vier Öffnen-Zweige nach
 Innentemperatur (Schlafzimmer, Bad, WC, Wohnzimmer+Terrasse) — sie konnten
